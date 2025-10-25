@@ -30,6 +30,9 @@ pub struct AttributeDefinition {
     pub name: String,                   // e.g., "Strength", "Intelligence"
     pub description: String,            // What this attribute represents
     pub category: AttributeCategory,    // Physical, Mental, Social
+    pub base_value: u32,                // Default starting value for new characters
+    pub min_value: u32,                 // Minimum possible value
+    pub max_value: u32,                 // Maximum possible value
     pub training_difficulty: Percentage, // How hard to improve (100% = normal, 150% = harder)
     pub icon: Option<String>,           // Icon filename/path
 }
