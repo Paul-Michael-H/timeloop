@@ -1,59 +1,34 @@
-// Timeloop - A deterministic time-loop RPG server
-// Architecture: REST API -> Game Engine -> Data Models -> Storage
+// Timeloop Client - Bevy UI for the Timeloop game
+// A deterministic time-loop RPG with Cobalt theme
 
-mod models;
-mod api;
-mod storage;
-mod game_engine;
+mod client;
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
 
-use api::handlers::AppState;
-use api::routes::create_router;
-use api::middleware::{cors_layer, tracing_layer};
-use storage::{GameDefinitionsLoader, save_manager::SaveManager};
+use client::theme::CobaltTheme;
 
-#[tokio::main]
-async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Timeloop".into(),
+                resolution: (1280.0, 720.0).into(),
+                resizable: true,
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(EguiPlugin)
+        .insert_resource(ClearColor(CobaltTheme::BG_DARK))
+        .insert_resource(CobaltTheme::default())
+        .add_systems(Startup, setup)
+        .run();
+}
+
+fn setup(mut commands: Commands) {
+    // Spawn camera
+    commands.spawn(Camera2dBundle::default());
     
-    tracing::info!("Starting Timeloop server...");
-    
-    // Initialize game definitions loader (empty for now - will load from files later)
-    let definitions = Arc::new(GameDefinitionsLoader::new());
-    tracing::info!("Game definitions loader initialized");
-    
-    // Initialize save manager
-    let save_manager = Arc::new(SaveManager::new("./saves"));
-    tracing::info!("Save manager initialized with directory: ./saves");
-    
-    // Create shared application state
-    let app_state = AppState {
-        game_state: Arc::new(RwLock::new(None)),
-        definitions: definitions.clone(),
-        save_manager: save_manager.clone(),
-    };
-    
-    // Create router with all endpoints
-    let app = create_router(app_state)
-        .layer(cors_layer())
-        .layer(tracing_layer());
-    
-    // Start server
-    let addr = "127.0.0.1:3000";
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("Failed to bind to address");
-    
-    tracing::info!("Server listening on http://{}", addr);
-    tracing::info!("Health check: http://{}/health", addr);
-    tracing::info!("API endpoints: http://{}/api/*", addr);
-    
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    info!("Timeloop client started with Cobalt theme");
 }
