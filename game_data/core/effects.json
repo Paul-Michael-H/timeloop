@@ -1,0 +1,36 @@
+[
+  {
+    "id": "750e8400-e29b-41d4-a716-446655440001",
+    "name": "Training Boost",
+    "description": "Increases training effectiveness",
+    "lore_text": "Enhanced focus and determination",
+    "attribute_modifiers": {
+      "550e8400-e29b-41d4-a716-446655440001": 2,
+      "550e8400-e29b-41d4-a716-446655440002": 2
+    },
+    "duration_ticks": 100,
+    "icon": "boost.png"
+  },
+  {
+    "id": "750e8400-e29b-41d4-a716-446655440002",
+    "name": "Physical Weakness",
+    "description": "Reduces physical capabilities",
+    "lore_text": "Exhaustion takes its toll",
+    "attribute_modifiers": {
+      "550e8400-e29b-41d4-a716-446655440001": -3
+    },
+    "duration_ticks": 50,
+    "icon": "weakness.png"
+  },
+  {
+    "id": "750e8400-e29b-41d4-a716-446655440003",
+    "name": "Social Charm",
+    "description": "Enhances social interactions",
+    "lore_text": "Natural charisma and charm",
+    "attribute_modifiers": {
+      "550e8400-e29b-41d4-a716-446655440003": 4
+    },
+    "duration_ticks": 200,
+    "icon": "charm.png"
+  }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "Physical",
+    "description": "Physical prowess, strength, and endurance",
+    "category": "Physical",
+    "base_value": 10,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 100,
+    "icon": "physical.png"
+  },
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "name": "Mental",
+    "description": "Intelligence, wisdom, and mental acuity",
+    "category": "Mental",
+    "base_value": 10,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 100,
+    "icon": "mental.png"
+  },
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "name": "Social",
+    "description": "Charisma, persuasion, and social skills",
+    "category": "Social",
+    "base_value": 10,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 120,
+    "icon": "social.png"
+  }
+]

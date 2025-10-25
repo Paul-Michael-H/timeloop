@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Timeloop Dev Team"]
 
+[lib]
+name = "timeloop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "timeloop"
+path = "src/main.rs"
+
 [dependencies]
 axum = "0.7"
 serde = { version = "1.0", features = ["derive"] }
@@ -18,4 +26,5 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 
 [dev-dependencies]
-tempfile = "3.0"
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
