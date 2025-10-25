@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 
 use client::theme::CobaltTheme;
+use client::state::{GameState, UiState, ApiClientResource, PollTimer};
 
 fn main() {
     App::new()
@@ -22,6 +23,10 @@ fn main() {
         .add_plugins(EguiPlugin)
         .insert_resource(ClearColor(CobaltTheme::BG_DARK))
         .insert_resource(CobaltTheme::default())
+        .insert_resource(GameState::default())
+        .insert_resource(UiState::default())
+        .insert_resource(ApiClientResource::default())
+        .insert_resource(PollTimer::default())
         .add_systems(Startup, setup)
         .run();
 }
@@ -31,4 +36,5 @@ fn setup(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
     
     info!("Timeloop client started with Cobalt theme");
+    info!("API client initialized for http://127.0.0.1:3000");
 }
