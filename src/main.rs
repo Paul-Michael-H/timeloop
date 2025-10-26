@@ -8,6 +8,8 @@ use bevy_egui::EguiPlugin;
 
 use client::theme::CobaltTheme;
 use client::state::{GameState, UiState, ApiClientResource, PollTimer};
+use client::systems::*;
+use client::events::*;
 
 fn main() {
     App::new()
@@ -27,7 +29,30 @@ fn main() {
         .insert_resource(UiState::default())
         .insert_resource(ApiClientResource::default())
         .insert_resource(PollTimer::default())
+        // Register all events
+        .add_event::<GameStateUpdated>()
+        .add_event::<ApiErrorOccurred>()
+        .add_event::<CreateGameRequest>()
+        .add_event::<AdvanceTickRequest>()
+        .add_event::<SetTrainingRequest>()
+        .add_event::<AcquireAffinityRequest>()
+        .add_event::<SaveGameRequest>()
+        .add_event::<GameCreated>()
+        .add_event::<TickAdvanced>()
+        .add_event::<GameSaved>()
+        .add_event::<ConnectionStatusChanged>()
+        // Startup systems
         .add_systems(Startup, setup)
+        .add_systems(Startup, startup_health_check)
+        // Update systems
+        .add_systems(Update, handle_game_state_updated)
+        .add_systems(Update, handle_api_errors)
+        .add_systems(Update, handle_connection_status_changed)
+        .add_systems(Update, handle_create_game_request)
+        .add_systems(Update, handle_advance_tick_request)
+        .add_systems(Update, handle_set_training_request)
+        .add_systems(Update, handle_acquire_affinity_request)
+        .add_systems(Update, handle_save_game_request)
         .run();
 }
 
