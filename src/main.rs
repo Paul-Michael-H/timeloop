@@ -10,6 +10,7 @@ use client::theme::CobaltTheme;
 use client::state::{GameState, UiState, ApiClientResource, PollTimer};
 use client::systems::*;
 use client::events::*;
+use client::ui::render_ui;
 
 fn main() {
     App::new()
@@ -53,6 +54,8 @@ fn main() {
         .add_systems(Update, handle_set_training_request)
         .add_systems(Update, handle_acquire_affinity_request)
         .add_systems(Update, handle_save_game_request)
+        // UI system
+        .add_systems(Update, render_ui)
         .run();
 }
 

@@ -5,3 +5,4 @@ pub mod events;
 pub mod state;
 pub mod systems;
 pub mod theme;
+pub mod ui;
