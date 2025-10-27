@@ -73,15 +73,29 @@ impl GameDefinitionsLoader {
     
     /// Load all definitions from JSON files in the specified directory
     pub async fn load_all_definitions(data_path: &Path) -> Result<Self, LoadError> {
-        // Load each definition type from its JSON file
-        let attributes_path = data_path.join("attributes.json");
+        // Load attributes using the editor's I/O module for consistency
+        let attributes = crate::editor::io::load_attributes()
+            .map_err(|e| LoadError::MissingFile(format!("attributes.json: {}", e)))?;
+        
+        // Load other definition types from their JSON files
         let affinities_path = data_path.join("affinities.json");
         let effects_path = data_path.join("effects.json");
         
-        // Read and parse JSON files
-        let attributes = Self::load_json_file::<Vec<AttributeDefinition>>(&attributes_path).await?;
-        let affinities = Self::load_json_file::<Vec<AffinityDefinition>>(&affinities_path).await?;
-        let effects = Self::load_json_file::<Vec<EffectDefinition>>(&effects_path).await?;
+        // Try to load affinities (skip if fails - not in Phase 1)
+        let affinities = Self::load_json_file::<Vec<AffinityDefinition>>(&affinities_path)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to load affinities: {:?} - using empty list", e);
+                Vec::new()
+            });
+        
+        // Try to load effects (skip if fails - not in Phase 1)
+        let effects = Self::load_json_file::<Vec<EffectDefinition>>(&effects_path)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to load effects: {:?} - using empty list", e);
+                Vec::new()
+            });
         
         // Convert to HashMaps
         let attributes_map: HashMap<AttributeId, AttributeDefinition> = 

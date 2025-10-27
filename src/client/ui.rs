@@ -5,7 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
 
 use crate::client::theme::CobaltTheme;
-use crate::client::state::{GameState, UiState, ConnectionStatus};
+use crate::client::state::{GameState, UiState, ConnectionStatus, AttributeDefinitions};
 use crate::client::events::*;
 
 /// Main UI system that renders the entire interface
@@ -15,6 +15,7 @@ pub fn render_ui(
     theme: Res<CobaltTheme>,
     game_state: Res<GameState>,
     mut ui_state: ResMut<UiState>,
+    attribute_defs: Res<AttributeDefinitions>,
     mut create_game_events: EventWriter<CreateGameRequest>,
     mut advance_tick_events: EventWriter<AdvanceTickRequest>,
     mut set_training_events: EventWriter<SetTrainingRequest>,
@@ -51,7 +52,7 @@ pub fn render_ui(
     egui::CentralPanel::default().show(ctx, |ui| {
         if !game_state.loaded {
             // Show main menu / new game screen
-            render_main_menu(ui, &mut ui_state, &mut create_game_events);
+            render_main_menu(ui, &mut ui_state, &attribute_defs, &mut create_game_events);
         } else {
             // Show game dashboard
             render_game_dashboard(
@@ -70,6 +71,7 @@ pub fn render_ui(
 fn render_main_menu(
     ui: &mut egui::Ui,
     ui_state: &mut UiState,
+    attribute_defs: &AttributeDefinitions,
     create_game_events: &mut EventWriter<CreateGameRequest>,
 ) {
     ui.vertical_centered(|ui| {
@@ -98,43 +100,55 @@ fn render_main_menu(
                 ui.label("Starting Attributes (Total: 20 points)");
                 ui.add_space(5.0);
                 
-                // Attribute sliders - using current phase attributes: Physical, Mental only
-                let mut physical = 10;
-                let mut mental = 10;
-                
-                ui.horizontal(|ui| {
-                    ui.label("Physical:");
-                    ui.add(egui::Slider::new(&mut physical, 5..=20));
-                });
-                
-                ui.horizontal(|ui| {
-                    ui.label("Mental:");
-                    ui.add(egui::Slider::new(&mut mental, 5..=20));
-                });
-                
-                let total = physical + mental;
-                ui.add_space(5.0);
-                ui.label(format!("Total: {} / 20", total));
-                
-                ui.add_space(15.0);
-                
-                if ui.button("Create Game").clicked() {
-                    let name = if ui_state.status_message.is_empty() {
-                        "Timelooper".to_string()
-                    } else {
-                        ui_state.status_message.clone()
-                    };
+                // Dynamic attribute sliders based on loaded definitions
+                if !attribute_defs.loaded || attribute_defs.definitions.is_empty() {
+                    ui.label("Loading attributes...");
+                } else {
+                    // Initialize attribute values if not already set
+                    if ui_state.character_creation_attrs.is_empty() {
+                        let total_points = 20;
+                        let points_per_attr = total_points / attribute_defs.definitions.len() as i32;
+                        
+                        for def in &attribute_defs.definitions {
+                            ui_state.character_creation_attrs.insert(def.id.clone(), points_per_attr);
+                        }
+                    }
                     
-                    let mut attrs = HashMap::new();
-                    attrs.insert("physical".to_string(), physical as u32);
-                    attrs.insert("mental".to_string(), mental as u32);
+                    // Display sliders for each attribute
+                    for def in &attribute_defs.definitions {
+                        if let Some(value) = ui_state.character_creation_attrs.get_mut(&def.id) {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{}:", def.name));
+                                ui.add(egui::Slider::new(value, 1..=20));
+                            });
+                        }
+                    }
                     
-                    create_game_events.send(CreateGameRequest {
-                        name,
-                        starting_attributes: attrs,
-                    });
+                    let total: i32 = ui_state.character_creation_attrs.values().sum();
+                    ui.add_space(5.0);
+                    ui.label(format!("Total: {} / 20", total));
                     
-                    ui_state.status_message = "Creating game...".to_string();
+                    ui.add_space(15.0);
+                    
+                    if ui.button("Create Game").clicked() {
+                        let name = if ui_state.status_message.is_empty() {
+                            "Timelooper".to_string()
+                        } else {
+                            ui_state.status_message.clone()
+                        };
+                        
+                        let mut attrs = HashMap::new();
+                        for (id, value) in &ui_state.character_creation_attrs {
+                            attrs.insert(id.clone(), *value as u32);
+                        }
+                        
+                        create_game_events.send(CreateGameRequest {
+                            name,
+                            starting_attributes: attrs,
+                        });
+                        
+                        ui_state.status_message = "Creating game...".to_string();
+                    }
                 }
             });
     });

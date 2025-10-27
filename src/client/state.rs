@@ -3,7 +3,14 @@
 #![allow(dead_code)]
 
 use bevy::prelude::*;
-use crate::client::api::{ApiClient, GameStateResponse, AttributeInfo, AffinityInfo};
+use crate::client::api::{ApiClient, GameStateResponse, AttributeInfo, AffinityInfo, AttributeDefinitionInfo};
+
+/// Available attribute definitions from the server
+#[derive(Resource, Default, Clone)]
+pub struct AttributeDefinitions {
+    pub definitions: Vec<AttributeDefinitionInfo>,
+    pub loaded: bool,
+}
 
 /// Main game state resource synced from the server
 #[derive(Resource, Default)]
@@ -90,6 +97,7 @@ pub struct UiState {
     pub selected_affinity_id: Option<String>,
     pub show_affinity_modal: bool,
     pub connection_status: ConnectionStatus,
+    pub character_creation_attrs: std::collections::HashMap<String, i32>,
 }
 
 #[derive(Default, PartialEq)]

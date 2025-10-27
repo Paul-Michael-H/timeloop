@@ -2,6 +2,7 @@
 // Architecture: REST API -> Game Engine -> Data Models -> Storage
 
 use std::sync::Arc;
+use std::path::Path;
 use tokio::sync::RwLock;
 
 use timeloop::api::handlers::AppState;
@@ -18,9 +19,21 @@ async fn main() {
     
     tracing::info!("Starting Timeloop server...");
     
-    // Initialize game definitions loader (empty for now - will load from files later)
-    let definitions = Arc::new(GameDefinitionsLoader::new());
-    tracing::info!("Game definitions loader initialized");
+    // Load game definitions from JSON files
+    let data_path = Path::new("game_data/core");
+    let definitions = match GameDefinitionsLoader::load_all_definitions(data_path).await {
+        Ok(defs) => {
+            let attr_count = defs.list_all_attributes().len();
+            tracing::info!("Game definitions loaded successfully");
+            tracing::info!("  - {} attributes", attr_count);
+            Arc::new(defs)
+        }
+        Err(e) => {
+            tracing::error!("Failed to load game definitions: {:?}", e);
+            tracing::warn!("Starting with empty definitions");
+            Arc::new(GameDefinitionsLoader::new())
+        }
+    };
     
     // Initialize save manager
     let save_manager = Arc::new(SaveManager::new("./saves"));

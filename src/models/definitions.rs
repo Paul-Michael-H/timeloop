@@ -24,7 +24,7 @@ pub struct AffinityDefinition {
 // ATTRIBUTE DEFINITION
 // ============================================================================
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AttributeDefinition {
     pub id: AttributeId,                // Definition identifier (from external file)
     pub name: String,                   // e.g., "Strength", "Intelligence"

@@ -6,9 +6,31 @@
 
 use bevy::prelude::*;
 use crate::client::state::{
-    GameState, UiState, ApiClientResource, PollTimer, ConnectionStatus
+    GameState, UiState, ApiClientResource, PollTimer, ConnectionStatus, AttributeDefinitions
 };
 use crate::client::events::*;
+
+/// System to load attribute definitions on startup (blocking)
+pub fn load_attribute_definitions(
+    api_client: Res<ApiClientResource>,
+    mut definitions: ResMut<AttributeDefinitions>,
+) {
+    info!("Loading attribute definitions...");
+    
+    let client = api_client.client.clone();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    
+    match rt.block_on(async { client.list_attribute_definitions().await }) {
+        Ok(defs) => {
+            info!("✓ Loaded {} attribute definitions", defs.len());
+            definitions.definitions = defs;
+            definitions.loaded = true;
+        }
+        Err(e) => {
+            error!("✗ Failed to load attribute definitions: {:?}", e);
+        }
+    }
+}
 
 /// System to poll the server for current game state
 pub fn poll_game_state(

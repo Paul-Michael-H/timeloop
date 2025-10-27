@@ -3,8 +3,14 @@
 #![allow(dead_code)]
 
 use bevy::prelude::*;
-use crate::client::api::GameStateResponse;
+use crate::client::api::{GameStateResponse, AttributeDefinitionInfo};
 use std::collections::HashMap;
+
+/// Event fired when attribute definitions are loaded
+#[derive(Event)]
+pub struct AttributeDefinitionsLoaded {
+    pub definitions: Vec<AttributeDefinitionInfo>,
+}
 
 /// Event fired when game state is successfully fetched from server
 #[derive(Event)]

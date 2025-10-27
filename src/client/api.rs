@@ -219,6 +219,25 @@ impl ApiClient {
             .map_err(|e| ApiError::ParseError(e.to_string()))
     }
     
+    /// List all attribute definitions
+    pub async fn list_attribute_definitions(&self) -> Result<Vec<AttributeDefinitionInfo>, ApiError> {
+        let url = format!("{}/api/definitions/attributes", self.base_url);
+        let response = self.client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ApiError::NetworkError(e.to_string()))?;
+        
+        if !response.status().is_success() {
+            return Err(ApiError::ServerError(response.status().as_u16()));
+        }
+        
+        response
+            .json()
+            .await
+            .map_err(|e| ApiError::ParseError(e.to_string()))
+    }
+    
     /// List all available affinities
     pub async fn list_affinities(&self) -> Result<DefinitionsResponse, ApiError> {
         let url = format!("{}/api/definitions/affinities", self.base_url);
@@ -302,6 +321,17 @@ pub struct AttributeInfo {
     pub name: String,
     pub value: u32,
     pub training: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AttributeDefinitionInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub base_value: u32,
+    pub min_value: u32,
+    pub max_value: u32,
 }
 
 #[derive(Deserialize, Debug, Clone)]

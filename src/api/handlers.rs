@@ -51,8 +51,9 @@ pub struct GameStateResponse {
 pub struct AttributeInfo {
     pub id: String,
     pub definition_id: String,
-    pub base_value: u32,
-    pub training_mode: String,
+    pub name: String,
+    pub value: u32,
+    pub training: bool,
 }
 
 #[derive(Serialize)]
@@ -122,13 +123,18 @@ pub async fn get_current_game(
     
     let character = &game_state.character;
     
-    // Build attribute list
-    let attributes: Vec<AttributeInfo> = character.attributes.iter().map(|(id, attr)| {
+    // Build attribute list with names from definitions
+    let attributes: Vec<AttributeInfo> = character.attributes.iter().map(|(def_id, attr)| {
+        let name = state.definitions.get_attribute_definition(def_id)
+            .map(|def| def.name.clone())
+            .unwrap_or_else(|| format!("Unknown ({:?})", def_id));
+        
         AttributeInfo {
             id: format!("{:?}", attr.id),
-            definition_id: format!("{:?}", id),
-            base_value: attr.base_value,
-            training_mode: format!("{:?}", attr.training_mode),
+            definition_id: format!("{:?}", def_id),
+            name,
+            value: attr.base_value,
+            training: matches!(attr.training_mode, TrainingMode::Active),
         }
     }).collect();
     

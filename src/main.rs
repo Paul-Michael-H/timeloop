@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 
 use client::theme::CobaltTheme;
-use client::state::{GameState, UiState, ApiClientResource, PollTimer};
+use client::state::{GameState, UiState, ApiClientResource, PollTimer, AttributeDefinitions};
 use client::systems::*;
 use client::events::*;
 use client::ui::render_ui;
@@ -30,6 +30,7 @@ fn main() {
         .insert_resource(UiState::default())
         .insert_resource(ApiClientResource::default())
         .insert_resource(PollTimer::default())
+        .insert_resource(AttributeDefinitions::default())
         // Register all events
         .add_event::<GameStateUpdated>()
         .add_event::<ApiErrorOccurred>()
@@ -45,6 +46,7 @@ fn main() {
         // Startup systems
         .add_systems(Startup, setup)
         .add_systems(Startup, startup_health_check)
+        .add_systems(Startup, load_attribute_definitions)
         // Update systems
         .add_systems(Update, handle_game_state_updated)
         .add_systems(Update, handle_api_errors)
