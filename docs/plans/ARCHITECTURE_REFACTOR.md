@@ -25,6 +25,17 @@ Refactor the Timeloop architecture to follow a consistent client-server pattern 
 - Services are trait-based for easy testing
 - Mock all dependencies in tests
 
+### 4. **Persistence Abstraction (Critical)**
+- **Business logic NEVER directly accesses storage**
+- Persistence is **completely abstracted** behind traits
+- Business logic receives persistence via dependency injection
+- Business logic has **zero knowledge** of:
+  - Where data is stored (file system, database, memory)
+  - How data is stored (JSON, binary, SQL)
+  - File paths, connection strings, or storage details
+- Can swap persistence implementations without touching business logic
+- Tests use in-memory persistence (no file system)
+
 ## Current Architecture Problems
 
 ### Editor (Current)
@@ -141,9 +152,28 @@ pub trait AttributeService: Send + Sync {
 }
 
 /// Production implementation
+/// CRITICAL: This has NO knowledge of where/how data is stored
 pub struct AttributeServiceImpl {
+    // Injected persistence - could be file, database, memory, network, etc.
+    // Business logic doesn't know or care
     persistence: Arc<dyn AttributePersistence>,
+    
+    // Injected validator - also injectable for testing
     validator: Arc<dyn AttributeValidator>,
+}
+
+impl AttributeServiceImpl {
+    /// Constructor accepts persistence via dependency injection
+    /// Business logic NEVER creates its own persistence
+    pub fn new(
+        persistence: Arc<dyn AttributePersistence>,
+        validator: Arc<dyn AttributeValidator>,
+    ) -> Self {
+        Self {
+            persistence,
+            validator,
+        }
+    }
 }
 
 impl AttributeService for AttributeServiceImpl {
@@ -152,12 +182,12 @@ impl AttributeService for AttributeServiceImpl {
         // 1. Validate
         self.validator.validate(&attr, &self.list_all()?)?;
         
-        // 2. Check uniqueness
+        // 2. Check uniqueness (using persistence abstraction)
         if self.persistence.exists_by_name(&attr.name)? {
             return Err(BusinessError::DuplicateName);
         }
         
-        // 3. Persist
+        // 3. Persist (business logic doesn't know if this is file, DB, memory, etc.)
         self.persistence.save(&attr)?;
         
         Ok(attr)
@@ -170,7 +200,7 @@ impl AttributeService for AttributeServiceImpl {
             return Err(BusinessError::IdMismatch);
         }
         
-        // 2. Check exists
+        // 2. Check exists (using persistence abstraction)
         if self.persistence.get(&id)?.is_none() {
             return Err(BusinessError::NotFound);
         }
@@ -178,7 +208,7 @@ impl AttributeService for AttributeServiceImpl {
         // 3. Validate
         self.validator.validate(&attr, &self.list_all()?)?;
         
-        // 4. Persist
+        // 4. Persist (business logic has no idea how this works)
         self.persistence.save(&attr)?;
         
         Ok(attr)
@@ -186,58 +216,159 @@ impl AttributeService for AttributeServiceImpl {
     
     fn delete_attribute(&self, id: AttributeId) 
         -> Result<(), BusinessError> {
-        // Check exists
+        // Check exists (using persistence abstraction)
         if self.persistence.get(&id)?.is_none() {
             return Err(BusinessError::NotFound);
         }
         
+        // Delete (business logic doesn't know the implementation)
         self.persistence.delete(&id)?;
         Ok(())
     }
     
     fn get_attribute(&self, id: AttributeId) 
         -> Result<AttributeDefinition, BusinessError> {
+        // Use persistence abstraction
         self.persistence.get(&id)?
             .ok_or(BusinessError::NotFound)
     }
     
     fn list_all(&self) -> Result<Vec<AttributeDefinition>, BusinessError> {
+        // Use persistence abstraction
         Ok(self.persistence.list_all()?)
     }
     
     fn search(&self, query: &str) 
         -> Result<Vec<AttributeDefinition>, BusinessError> {
-        let all = self.list_all()?;
-        let query_lower = query.to_lowercase();
-        
-        Ok(all.into_iter()
-            .filter(|a| a.name.to_lowercase().contains(&query_lower))
-            .collect())
+        // Use persistence abstraction (might be optimized in DB implementation)
+        Ok(self.persistence.search_by_name(query)?)
+    }
+}
+
+// Convert persistence errors to business errors
+impl From<PersistenceError> for BusinessError {
+    fn from(err: PersistenceError) -> Self {
+        match err {
+            PersistenceError::NotFound => BusinessError::NotFound,
+            PersistenceError::StorageError(msg) => BusinessError::PersistenceError(msg),
+            PersistenceError::SerializationError(msg) => BusinessError::PersistenceError(msg),
+        }
     }
 }
 ```
 
+**Verification that business logic doesn't know about storage**:
+- ✅ No `use std::fs` in business logic
+- ✅ No `use std::path::PathBuf` in business logic
+- ✅ No file paths in business logic
+- ✅ No JSON serialization in business logic
+- ✅ Only uses `AttributePersistence` trait
+- ✅ Can swap implementations without changing code
+
 #### 1.2 Create Persistence Layer Traits (1 hour)
 **File**: `src/persistence/mod.rs` (refactor existing storage)
 
+**Critical Design Principle**: Business logic has ZERO knowledge of storage implementation
+
 ```rust
 // src/persistence/traits.rs
+
+/// Persistence trait for attributes - business logic depends on THIS, not implementation
 pub trait AttributePersistence: Send + Sync {
+    /// Save or update an attribute
+    /// Business logic doesn't know if this writes to file, database, or memory
     fn save(&self, attr: &AttributeDefinition) -> Result<(), PersistenceError>;
+    
+    /// Delete an attribute by ID
     fn delete(&self, id: &AttributeId) -> Result<(), PersistenceError>;
+    
+    /// Get a single attribute by ID
     fn get(&self, id: &AttributeId) -> Result<Option<AttributeDefinition>, PersistenceError>;
+    
+    /// List all attributes
     fn list_all(&self) -> Result<Vec<AttributeDefinition>, PersistenceError>;
+    
+    /// Check if an attribute with this name exists
     fn exists_by_name(&self, name: &str) -> Result<bool, PersistenceError>;
+    
+    /// Search attributes by name (contains)
+    fn search_by_name(&self, query: &str) -> Result<Vec<AttributeDefinition>, PersistenceError>;
+}
+
+/// Persistence error - no details about storage type
+#[derive(Debug, thiserror::Error)]
+pub enum PersistenceError {
+    #[error("Item not found")]
+    NotFound,
+    
+    #[error("Storage operation failed: {0}")]
+    StorageError(String),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
 
 // src/persistence/file_storage.rs
+
+/// File-based implementation (business logic doesn't know about this)
 pub struct FileAttributePersistence {
     file_path: PathBuf,
+    // Internal cache (optional optimization)
+    cache: RwLock<Option<Vec<AttributeDefinition>>>,
+}
+
+impl FileAttributePersistence {
+    pub fn new(file_path: impl Into<PathBuf>) -> Self {
+        Self {
+            file_path: file_path.into(),
+            cache: RwLock::new(None),
+        }
+    }
+    
+    /// Internal helper - business logic never calls this
+    fn load_from_file(&self) -> Result<Vec<AttributeDefinition>, PersistenceError> {
+        if !self.file_path.exists() {
+            return Ok(Vec::new());
+        }
+        
+        let content = fs::read_to_string(&self.file_path)
+            .map_err(|e| PersistenceError::StorageError(e.to_string()))?;
+        
+        serde_json::from_str(&content)
+            .map_err(|e| PersistenceError::SerializationError(e.to_string()))
+    }
+    
+    /// Internal helper - business logic never calls this
+    fn save_to_file(&self, attrs: &[AttributeDefinition]) -> Result<(), PersistenceError> {
+        // Create backup
+        if self.file_path.exists() {
+            let backup = self.file_path.with_extension("json.backup");
+            fs::copy(&self.file_path, &backup)
+                .map_err(|e| PersistenceError::StorageError(format!("Backup failed: {}", e)))?;
+        }
+        
+        // Serialize
+        let json = serde_json::to_string_pretty(&attrs)
+            .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
+        
+        // Atomic write (temp + rename)
+        let temp_path = self.file_path.with_extension("tmp");
+        fs::write(&temp_path, json)
+            .map_err(|e| PersistenceError::StorageError(e.to_string()))?;
+        
+        fs::rename(&temp_path, &self.file_path)
+            .map_err(|e| PersistenceError::StorageError(e.to_string()))?;
+        
+        // Update cache
+        *self.cache.write().unwrap() = Some(attrs.to_vec());
+        
+        Ok(())
+    }
 }
 
 impl AttributePersistence for FileAttributePersistence {
     fn save(&self, attr: &AttributeDefinition) -> Result<(), PersistenceError> {
-        // Load all, upsert, save with backup
+        // Load all, upsert, save
         let mut all = self.list_all()?;
         
         // Find and update or insert
@@ -247,14 +378,125 @@ impl AttributePersistence for FileAttributePersistence {
             all.push(attr.clone());
         }
         
-        // Atomic save with backup
-        self.save_all(&all)?;
+        self.save_to_file(&all)
+    }
+    
+    fn delete(&self, id: &AttributeId) -> Result<(), PersistenceError> {
+        let mut all = self.list_all()?;
+        
+        let initial_len = all.len();
+        all.retain(|a| &a.id != id);
+        
+        if all.len() == initial_len {
+            return Err(PersistenceError::NotFound);
+        }
+        
+        self.save_to_file(&all)
+    }
+    
+    fn get(&self, id: &AttributeId) -> Result<Option<AttributeDefinition>, PersistenceError> {
+        let all = self.list_all()?;
+        Ok(all.into_iter().find(|a| &a.id == id))
+    }
+    
+    fn list_all(&self) -> Result<Vec<AttributeDefinition>, PersistenceError> {
+        // Check cache first
+        if let Some(cached) = self.cache.read().unwrap().as_ref() {
+            return Ok(cached.clone());
+        }
+        
+        // Load from file
+        let attrs = self.load_from_file()?;
+        
+        // Update cache
+        *self.cache.write().unwrap() = Some(attrs.clone());
+        
+        Ok(attrs)
+    }
+    
+    fn exists_by_name(&self, name: &str) -> Result<bool, PersistenceError> {
+        let all = self.list_all()?;
+        Ok(all.iter().any(|a| a.name == name))
+    }
+    
+    fn search_by_name(&self, query: &str) -> Result<Vec<AttributeDefinition>, PersistenceError> {
+        let all = self.list_all()?;
+        let query_lower = query.to_lowercase();
+        
+        Ok(all.into_iter()
+            .filter(|a| a.name.to_lowercase().contains(&query_lower))
+            .collect())
+    }
+}
+
+// src/persistence/memory_storage.rs
+
+/// In-memory implementation for testing (business logic doesn't know about this either)
+pub struct InMemoryAttributePersistence {
+    storage: RwLock<HashMap<AttributeId, AttributeDefinition>>,
+}
+
+impl InMemoryAttributePersistence {
+    pub fn new() -> Self {
+        Self {
+            storage: RwLock::new(HashMap::new()),
+        }
+    }
+    
+    pub fn with_data(data: Vec<AttributeDefinition>) -> Self {
+        let mut map = HashMap::new();
+        for attr in data {
+            map.insert(attr.id, attr);
+        }
+        
+        Self {
+            storage: RwLock::new(map),
+        }
+    }
+}
+
+impl AttributePersistence for InMemoryAttributePersistence {
+    fn save(&self, attr: &AttributeDefinition) -> Result<(), PersistenceError> {
+        self.storage.write().unwrap().insert(attr.id, attr.clone());
         Ok(())
     }
     
-    // ... other implementations
+    fn delete(&self, id: &AttributeId) -> Result<(), PersistenceError> {
+        self.storage.write().unwrap()
+            .remove(id)
+            .ok_or(PersistenceError::NotFound)?;
+        Ok(())
+    }
+    
+    fn get(&self, id: &AttributeId) -> Result<Option<AttributeDefinition>, PersistenceError> {
+        Ok(self.storage.read().unwrap().get(id).cloned())
+    }
+    
+    fn list_all(&self) -> Result<Vec<AttributeDefinition>, PersistenceError> {
+        Ok(self.storage.read().unwrap().values().cloned().collect())
+    }
+    
+    fn exists_by_name(&self, name: &str) -> Result<bool, PersistenceError> {
+        Ok(self.storage.read().unwrap().values().any(|a| a.name == name))
+    }
+    
+    fn search_by_name(&self, query: &str) -> Result<Vec<AttributeDefinition>, PersistenceError> {
+        let query_lower = query.to_lowercase();
+        Ok(self.storage.read().unwrap()
+            .values()
+            .filter(|a| a.name.to_lowercase().contains(&query_lower))
+            .cloned()
+            .collect())
+    }
 }
 ```
+
+**Key Points**:
+- Business logic depends on `AttributePersistence` trait only
+- Business logic never imports file system modules
+- Business logic never knows about file paths
+- Can swap implementations without changing business logic
+- Tests use `InMemoryAttributePersistence` (no file I/O)
 
 #### 1.3 Add API Endpoints for Definitions (2 hours)
 **File**: `src/api/routes.rs` (extend existing)
@@ -694,7 +936,7 @@ pub fn load_attribute_definitions(
 #### 4.1 Unit Tests for Business Logic (Injectable Services)
 **File**: `tests/business_logic_tests.rs` (new)
 
-**Key principle**: Test business logic independently with NO API server
+**Key principle**: Test business logic independently with NO storage implementation
 
 ```rust
 #[cfg(test)]
@@ -704,6 +946,7 @@ mod attribute_service_tests {
     use mockall::mock;
     
     // Mock persistence layer (injectable)
+    // Business logic uses this instead of real storage
     mock! {
         pub AttributePersistence {}
         
@@ -713,6 +956,7 @@ mod attribute_service_tests {
             fn get(&self, id: &AttributeId) -> Result<Option<AttributeDefinition>, PersistenceError>;
             fn list_all(&self) -> Result<Vec<AttributeDefinition>, PersistenceError>;
             fn exists_by_name(&self, name: &str) -> Result<bool, PersistenceError>;
+            fn search_by_name(&self, query: &str) -> Result<Vec<AttributeDefinition>, PersistenceError>;
         }
     }
     
@@ -728,7 +972,7 @@ mod attribute_service_tests {
     
     #[test]
     fn test_create_attribute_validates() {
-        // Arrange
+        // Arrange - inject mocks (business logic doesn't know they're mocks)
         let mut mock_persistence = MockAttributePersistence::new();
         let mut mock_validator = MockAttributeValidator::new();
         
@@ -740,6 +984,7 @@ mod attribute_service_tests {
             .expect_validate()
             .returning(|_, _| Err(ValidationError::EmptyName));
         
+        // Business logic receives injected dependencies
         let service = AttributeServiceImpl::new(
             Arc::new(mock_persistence),
             Arc::new(mock_validator),
@@ -757,7 +1002,7 @@ mod attribute_service_tests {
     
     #[test]
     fn test_create_attribute_checks_duplicates() {
-        // Arrange
+        // Arrange - mock persistence behavior
         let mut mock_persistence = MockAttributePersistence::new();
         let mut mock_validator = MockAttributeValidator::new();
         
@@ -765,6 +1010,7 @@ mod attribute_service_tests {
             .expect_list_all()
             .returning(|| Ok(vec![]));
         
+        // Mock says name exists
         mock_persistence
             .expect_exists_by_name()
             .with(eq("Strength"))
@@ -786,7 +1032,7 @@ mod attribute_service_tests {
         };
         let result = service.create_attribute(attr);
         
-        // Assert
+        // Assert - business logic correctly detected duplicate
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), BusinessError::DuplicateName));
     }
@@ -804,6 +1050,7 @@ mod attribute_service_tests {
             ..Default::default()
         };
         
+        // Mock persistence returns existing item
         mock_persistence
             .expect_get()
             .with(eq(id))
@@ -817,6 +1064,7 @@ mod attribute_service_tests {
             .expect_validate()
             .returning(|_, _| Ok(()));
         
+        // Mock persistence accepts save
         mock_persistence
             .expect_save()
             .returning(|_| Ok(()));
@@ -847,6 +1095,7 @@ mod attribute_service_tests {
         
         let id = AttributeId::new();
         
+        // Mock persistence says doesn't exist
         mock_persistence
             .expect_get()
             .with(eq(id))
@@ -860,26 +1109,24 @@ mod attribute_service_tests {
         // Act
         let result = service.delete_attribute(id);
         
-        // Assert
+        // Assert - business logic correctly handles not found
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), BusinessError::NotFound));
     }
     
     #[test]
-    fn test_search_filters_by_name() {
+    fn test_search_uses_persistence_abstraction() {
         // Arrange
         let mut mock_persistence = MockAttributePersistence::new();
         let mock_validator = MockAttributeValidator::new();
         
+        // Mock persistence handles search (could be DB query, file search, etc.)
         mock_persistence
-            .expect_list_all()
-            .returning(|| Ok(vec![
+            .expect_search_by_name()
+            .with(eq("physical"))
+            .returning(|_| Ok(vec![
                 AttributeDefinition {
                     name: "Physical Strength".to_string(),
-                    ..Default::default()
-                },
-                AttributeDefinition {
-                    name: "Mental Power".to_string(),
                     ..Default::default()
                 },
                 AttributeDefinition {
@@ -900,11 +1147,82 @@ mod attribute_service_tests {
         assert!(result.is_ok());
         let results = result.unwrap();
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|a| a.name.to_lowercase().contains("physical")));
     }
 }
 
-// Validator tests (separate from service)
+// Tests using in-memory persistence (no mocking framework needed)
+#[cfg(test)]
+mod attribute_service_integration_tests {
+    use super::*;
+    use crate::persistence::memory_storage::InMemoryAttributePersistence;
+    
+    #[test]
+    fn test_full_crud_cycle_with_memory_storage() {
+        // Arrange - use real in-memory persistence (no file system)
+        let persistence = Arc::new(InMemoryAttributePersistence::new());
+        let validator = Arc::new(AttributeValidatorImpl::new());
+        let service = AttributeServiceImpl::new(persistence, validator);
+        
+        // Create
+        let attr = AttributeDefinition {
+            id: AttributeId::new(),
+            name: "Test Attribute".to_string(),
+            description: "Test description".to_string(),
+            category: AttributeCategory::Physical,
+            base_value: 10,
+            min_value: 1,
+            max_value: 100,
+            training_difficulty: Percentage::new(100),
+            icon: None,
+        };
+        
+        let created = service.create_attribute(attr.clone()).unwrap();
+        assert_eq!(created.name, "Test Attribute");
+        
+        // Read
+        let retrieved = service.get_attribute(created.id).unwrap();
+        assert_eq!(retrieved.name, "Test Attribute");
+        
+        // Update
+        let mut updated = retrieved.clone();
+        updated.name = "Updated Attribute".to_string();
+        let saved = service.update_attribute(updated.id, updated).unwrap();
+        assert_eq!(saved.name, "Updated Attribute");
+        
+        // List
+        let all = service.list_all().unwrap();
+        assert_eq!(all.len(), 1);
+        
+        // Delete
+        service.delete_attribute(created.id).unwrap();
+        let all = service.list_all().unwrap();
+        assert_eq!(all.len(), 0);
+    }
+    
+    #[test]
+    fn test_persistence_is_transparent() {
+        // Arrange - create service with memory persistence
+        let persistence = Arc::new(InMemoryAttributePersistence::new());
+        let validator = Arc::new(AttributeValidatorImpl::new());
+        let service = AttributeServiceImpl::new(persistence.clone(), validator);
+        
+        // Act - create through service
+        let attr = AttributeDefinition {
+            id: AttributeId::new(),
+            name: "Test".to_string(),
+            ..Default::default()
+        };
+        service.create_attribute(attr.clone()).unwrap();
+        
+        // Assert - verify storage received it (business logic doesn't do this)
+        // This proves business logic successfully used abstraction
+        let stored = persistence.get(&attr.id).unwrap();
+        assert!(stored.is_some());
+        assert_eq!(stored.unwrap().name, "Test");
+    }
+}
+
+// Validator tests (separate from service and persistence)
 #[cfg(test)]
 mod attribute_validator_tests {
     use super::*;
@@ -954,6 +1272,12 @@ mod attribute_validator_tests {
     }
 }
 ```
+
+**Test Strategy Summary**:
+1. **Unit tests with mocks** - Test business logic in complete isolation
+2. **Integration tests with memory storage** - Test with real implementations but no file system
+3. **Persistence tests** - Test file storage separately
+4. **No file system in business logic tests** - All use mocks or memory storage
 
 #### 4.2 Integration Tests for API
 **File**: `tests/api_integration_tests.rs` (new)
