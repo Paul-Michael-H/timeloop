@@ -9,12 +9,12 @@ use std::fs;
 
 #[test]
 fn test_editor_state_creation() {
-    let state = EditorState::new();
+    let state = EditorState::new("http://localhost:3000");
     
     assert_eq!(state.attributes.len(), 0);
     assert_eq!(state.selected_index, None);
     assert_eq!(state.editing_attribute, None);
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
     assert_eq!(state.search_text, "");
     assert_eq!(state.validation_errors.len(), 0);
     assert_eq!(state.validation_warnings.len(), 0);
@@ -36,7 +36,7 @@ fn test_default_attribute_creation() {
 
 #[test]
 fn test_start_creating_unique_names() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     // Create first attribute
     state.start_creating();
@@ -55,7 +55,7 @@ fn test_start_creating_unique_names() {
 
 #[test]
 fn test_start_editing() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     // Add an attribute
     let attr = AttributeDefinition {
@@ -77,12 +77,12 @@ fn test_start_editing() {
     
     assert!(state.editing_attribute.is_some());
     assert_eq!(state.editing_attribute.as_ref().unwrap().name, "Test Attr");
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
 }
 
 #[test]
 fn test_save_current_edit_new() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     state.start_creating();
     assert_eq!(state.attributes.len(), 0);
@@ -97,12 +97,12 @@ fn test_save_current_edit_new() {
     assert_eq!(state.attributes.len(), 1);
     assert_eq!(state.attributes[0].name, "Custom Attribute");
     assert_eq!(state.selected_index, Some(0));
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
 }
 
 #[test]
 fn test_save_current_edit_existing() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     // Add an attribute
     let attr = AttributeDefinition::default_new();
@@ -120,12 +120,12 @@ fn test_save_current_edit_existing() {
     
     assert_eq!(state.attributes.len(), 1);
     assert_eq!(state.attributes[0].name, "Modified Name");
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
 }
 
 #[test]
 fn test_delete_selected() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     // Add two attributes
     state.attributes.push(AttributeDefinition::default_new());
@@ -143,7 +143,7 @@ fn test_delete_selected() {
 
 #[test]
 fn test_filtered_attributes() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     let mut attr1 = AttributeDefinition::default_new();
     attr1.name = "Physical Strength".to_string();
@@ -310,7 +310,7 @@ fn test_validation_valid_attribute() {
 
 #[test]
 fn test_update_validation_in_state() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     state.start_creating();
     
@@ -324,7 +324,7 @@ fn test_update_validation_in_state() {
     }
     
     validation::update_validation(&mut state);
-    assert!(state.validation_errors.len() > 0);
+    assert!(!state.validation_errors.is_empty());
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn test_load_attributes_from_file() {
     
     match result {
         Ok(attrs) => {
-            assert!(attrs.len() > 0, "Should have loaded at least one attribute");
+            assert!(!attrs.is_empty(), "Should have loaded at least one attribute");
             
             // Verify structure
             for attr in attrs {
@@ -405,27 +405,27 @@ fn test_save_and_load_attributes() {
 
 #[test]
 fn test_mark_dirty() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
     
     state.mark_dirty();
     
-    assert_eq!(state.is_dirty, true);
+    assert!(state.is_dirty);
 }
 
 #[test]
 fn test_revert_edit() {
-    let mut state = EditorState::new();
+    let mut state = EditorState::new("http://localhost:3000");
     
     state.start_creating();
     state.mark_dirty();
     
     assert!(state.editing_attribute.is_some());
-    assert_eq!(state.is_dirty, true);
+    assert!(state.is_dirty);
     
     state.revert_edit();
     
     assert_eq!(state.editing_attribute, None);
-    assert_eq!(state.is_dirty, false);
+    assert!(!state.is_dirty);
 }

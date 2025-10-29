@@ -1,5 +1,5 @@
 // Timeloop Server - A deterministic time-loop RPG REST API server
-// Architecture: REST API -> Game Engine -> Data Models -> Storage
+// Architecture: REST API -> Business Logic -> Persistence -> Storage
 
 use std::sync::Arc;
 use std::path::Path;
@@ -9,6 +9,11 @@ use timeloop::api::handlers::AppState;
 use timeloop::api::routes::create_router;
 use timeloop::api::middleware::{cors_layer, tracing_layer};
 use timeloop::storage::{GameDefinitionsLoader, save_manager::SaveManager};
+
+// New: Import business logic and persistence layers
+use timeloop::business::definitions::AttributeServiceImpl;
+use timeloop::business::validation::AttributeValidatorImpl;
+use timeloop::persistence::{FileAttributePersistence, AttributePersistence};
 
 #[tokio::main]
 async fn main() {
@@ -39,11 +44,34 @@ async fn main() {
     let save_manager = Arc::new(SaveManager::new("./saves"));
     tracing::info!("Save manager initialized with directory: ./saves");
     
+    // === NEW: Initialize business logic layer with dependency injection ===
+    
+    // 1. Create persistence layer (file-based)
+    let attributes_file = data_path.join("attributes.json");
+    let attribute_persistence: Arc<dyn AttributePersistence> = Arc::new(
+        FileAttributePersistence::new(attributes_file.clone())
+    );
+    tracing::info!("Attribute persistence initialized: {:?}", attributes_file);
+    
+    // 2. Create validator
+    let attribute_validator = Arc::new(AttributeValidatorImpl::new());
+    tracing::info!("Attribute validator initialized");
+    
+    // 3. Create business service (injecting persistence and validator)
+    let attribute_service = Arc::new(AttributeServiceImpl::new(
+        attribute_persistence,
+        attribute_validator,
+    ));
+    tracing::info!("Attribute service initialized with dependency injection");
+    
+    // === END NEW ===
+    
     // Create shared application state
     let app_state = AppState {
         game_state: Arc::new(RwLock::new(None)),
         definitions: definitions.clone(),
         save_manager: save_manager.clone(),
+        attribute_service, // Inject service into app state
     };
     
     // Create router with all endpoints

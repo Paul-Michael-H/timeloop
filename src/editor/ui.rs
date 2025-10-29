@@ -1,10 +1,9 @@
-// Editor UI System - Main interface
+// Editor UI System - Main interface with API Communication
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::client::theme::CobaltTheme;
 use crate::editor::{EditorState, validation};
-use crate::editor::io;
 use crate::models::definitions::AttributeCategory;
 
 /// Main UI system that renders the editor interface
@@ -19,7 +18,7 @@ pub fn ui_system(
     apply_cobalt_theme(ctx, &theme);
     
     // Top menu bar
-    render_top_bar(ctx, &mut *state);
+    render_top_bar(ctx, &mut state);
     
     // Main content area
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -27,21 +26,21 @@ pub fn ui_system(
             // Left panel - List view
             ui.vertical(|ui| {
                 ui.set_width(350.0);
-                render_list_view(ui, &mut *state);
+                render_list_view(ui, &mut state);
             });
             
             ui.separator();
             
             // Right panel - Detail view (take remaining space)
             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true), |ui| {
-                render_detail_view(ui, &mut *state);
+                render_detail_view(ui, &mut state);
             });
         });
     });
     
     // Delete confirmation dialog
     if state.show_delete_confirmation {
-        render_delete_dialog(ctx, &mut *state);
+        render_delete_dialog(ctx, &mut state);
     }
 }
 
@@ -52,40 +51,53 @@ fn render_top_bar(ctx: &egui::Context, state: &mut EditorState) {
             ui.heading("⚙ Timeloop - Attribute Editor");
             ui.separator();
             
-            // Load button
-            if ui.button("📂 Load").clicked() {
-                match io::load_attributes() {
-                    Ok(attrs) => {
-                        state.attributes = attrs;
-                        state.selected_index = None;
-                        state.editing_attribute = None;
-                        state.is_dirty = false;
-                        state.status_message = format!("Loaded {} attributes", state.attributes.len());
-                    }
-                    Err(e) => {
-                        state.status_message = format!("Error loading: {}", e);
-                    }
-                }
+            // Server connection indicator
+            let connection_color = if state.server_connected {
+                egui::Color32::from_rgb(0, 255, 0)
+            } else {
+                egui::Color32::from_rgb(255, 0, 0)
+            };
+            ui.colored_label(connection_color, if state.server_connected { "● Connected" } else { "● Disconnected" });
+            ui.separator();
+            
+            // Load from Server button
+            if ui.button("📂 Load from Server").clicked() {
+                let mut state_clone = state.clone();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(state_clone.refresh_from_server());
+                });
+                state.status_message = "Loading from server...".to_string();
             }
             
-            // Save All button
-            let can_save = !state.validation_errors.is_empty() == false;
-            if ui.add_enabled(can_save, egui::Button::new("💾 Save All")).clicked() {
-                match io::save_attributes(&state.attributes) {
-                    Ok(_) => {
-                        state.status_message = "Successfully saved all attributes".to_string();
-                        state.is_dirty = false;
-                    }
-                    Err(e) => {
-                        state.status_message = format!("Error saving: {}", e);
-                    }
-                }
+            // Save button (saves current editing attribute only)
+            let can_save = state.editing_attribute.is_some() && state.validation_errors.is_empty();
+            if ui.add_enabled(can_save, egui::Button::new("💾 Save to Server")).clicked() {
+                let mut state_clone = state.clone();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(state_clone.save_current_to_server());
+                });
+                state.status_message = "Saving to server...".to_string();
             }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Status message
                 if !state.status_message.is_empty() {
-                    ui.label(&state.status_message);
+                    let color = if state.status_message.starts_with("✓") {
+                        egui::Color32::from_rgb(0, 255, 0)
+                    } else if state.status_message.starts_with("✗") {
+                        egui::Color32::from_rgb(255, 0, 0)
+                    } else {
+                        egui::Color32::WHITE
+                    };
+                    ui.colored_label(color, &state.status_message);
+                }
+                
+                // Pending operation indicator
+                if let Some(op) = &state.pending_operation {
+                    ui.spinner();
+                    ui.label(op);
                 }
                 
                 // Dirty indicator
@@ -202,7 +214,7 @@ fn render_detail_view(ui: &mut egui::Ui, state: &mut EditorState) {
         // Name
         ui.horizontal(|ui| {
             ui.label("Name:").on_hover_text("Unique name for this attribute");
-            let mut text_edit = egui::TextEdit::singleline(&mut attr.name);
+            let text_edit = egui::TextEdit::singleline(&mut attr.name);
             let response = ui.add(text_edit);
             if response.gained_focus() {
                 if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
@@ -355,10 +367,8 @@ fn render_detail_view(ui: &mut egui::Ui, state: &mut EditorState) {
             }
             
             // Delete button (only for existing attributes)
-            if !is_new {
-                if ui.button("🗑 Delete").clicked() {
-                    should_delete = true;
-                }
+            if !is_new && ui.button("🗑 Delete").clicked() {
+                should_delete = true;
             }
         });
     });

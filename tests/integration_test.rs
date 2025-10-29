@@ -174,15 +174,22 @@ async fn create_test_app() -> axum::Router {
     use timeloop::storage::game_data_loader::GameDefinitionsLoader;
     use timeloop::storage::save_manager::SaveManager;
     use timeloop::game_engine::simulation::GameState;
+    use timeloop::business::definitions::AttributeServiceImpl;
+    use timeloop::business::validation::AttributeValidatorImpl;
+    use timeloop::persistence::InMemoryAttributePersistence;
 
     // Create test state
     let definitions = GameDefinitionsLoader::new();
     let save_manager = SaveManager::new("./test_saves");
+    let persistence = Arc::new(InMemoryAttributePersistence::new());
+    let validator = Arc::new(AttributeValidatorImpl::new());
+    let attribute_service = Arc::new(AttributeServiceImpl::new(persistence, validator));
     
     let state = AppState {
         game_state: Arc::new(RwLock::new(None::<GameState>)),
         definitions: Arc::new(definitions),
         save_manager: Arc::new(save_manager),
+        attribute_service,
     };
 
     create_router(state)

@@ -3,6 +3,7 @@
 use crate::models::definitions::AttributeDefinition;
 use crate::editor::EditorState;
 
+#[derive(Default)]
 pub struct ValidationResult {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
@@ -10,10 +11,7 @@ pub struct ValidationResult {
 
 impl ValidationResult {
     pub fn new() -> Self {
-        Self {
-            errors: Vec::new(),
-            warnings: Vec::new(),
-        }
+        Self::default()
     }
     
     pub fn is_valid(&self) -> bool {

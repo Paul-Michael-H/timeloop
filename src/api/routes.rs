@@ -2,7 +2,7 @@
 // This maps HTTP endpoints to handlers
 
 use axum::{
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 
@@ -25,10 +25,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/game/training", post(set_training))
         .route("/api/game/affinities", post(acquire_affinity))
         
-        // Definition endpoints
-        .route("/api/definitions/attributes", get(list_attributes))
+        // Definition endpoints (Read-only - legacy)
+        .route("/api/definitions/attributes", get(search_attributes))
         .route("/api/definitions/affinities", get(list_affinities))
         .route("/api/definitions/effects", get(list_effects))
+        
+        // Attribute CRUD endpoints (New)
+        .route("/api/definitions/attributes", post(create_attribute))
+        .route("/api/definitions/attributes/:id", get(get_attribute))
+        .route("/api/definitions/attributes/:id", put(update_attribute))
+        .route("/api/definitions/attributes/:id", delete(delete_attribute))
         
         .with_state(state)
 }

@@ -33,6 +33,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
+async-trait = "0.1"
 
 # Client dependencies
 bevy = "0.14"
@@ -42,3 +43,4 @@ reqwest = { version = "0.12", features = ["json"] }
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+tempfile = "3.0"

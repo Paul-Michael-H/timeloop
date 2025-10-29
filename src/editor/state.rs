@@ -1,13 +1,14 @@
-// Editor State Management
+// Editor State Management - Now uses API instead of direct file I/O
 
 use crate::models::definitions::AttributeDefinition;
 use crate::models::common::{AttributeId, Percentage};
+use crate::editor::api_client::EditorApiClient;
 use bevy::prelude::Resource;
 
 /// Main editor state resource
-#[derive(Debug, Resource)]
+#[derive(Resource, Clone)]
 pub struct EditorState {
-    /// All loaded attributes
+    /// All loaded attributes (from server)
     pub attributes: Vec<AttributeDefinition>,
     
     /// Currently selected attribute (index into attributes vec)
@@ -15,6 +16,9 @@ pub struct EditorState {
     
     /// Attribute being edited (clone of selected, or new)
     pub editing_attribute: Option<AttributeDefinition>,
+    
+    /// API client for server communication
+    pub api_client: EditorApiClient,
     
     /// Whether current edit has unsaved changes
     pub is_dirty: bool,
@@ -28,25 +32,138 @@ pub struct EditorState {
     /// Whether to show delete confirmation dialog
     pub show_delete_confirmation: bool,
     
-    /// Validation errors for current edit
+    /// Validation errors for current edit (from server)
     pub validation_errors: Vec<String>,
     
-    /// Validation warnings for current edit
+    /// Validation warnings for current edit (from server)
     pub validation_warnings: Vec<String>,
+    
+    /// Server connection status
+    pub server_connected: bool,
+    
+    /// Pending async operation (for UI feedback)
+    pub pending_operation: Option<String>,
 }
 
 impl EditorState {
-    pub fn new() -> Self {
+    pub fn new(api_url: &str) -> Self {
         Self {
             attributes: Vec::new(),
             selected_index: None,
             editing_attribute: None,
+            api_client: EditorApiClient::new(api_url),
             is_dirty: false,
             search_text: String::new(),
-            status_message: "Ready".to_string(),
+            status_message: "Connecting to server...".to_string(),
             show_delete_confirmation: false,
             validation_errors: Vec::new(),
             validation_warnings: Vec::new(),
+            server_connected: false,
+            pending_operation: None,
+        }
+    }
+    
+    /// Load attributes from server (replaces load_attributes from file)
+    pub async fn refresh_from_server(&mut self) -> Result<(), String> {
+        self.pending_operation = Some("Loading...".to_string());
+        
+        match self.api_client.list_attributes().await {
+            Ok(attrs) => {
+                self.attributes = attrs;
+                self.server_connected = true;
+                self.status_message = format!("✓ Loaded {} attributes from server", self.attributes.len());
+                self.pending_operation = None;
+                Ok(())
+            }
+            Err(e) => {
+                self.server_connected = false;
+                self.status_message = format!("✗ Server error: {}", e);
+                self.pending_operation = None;
+                Err(e.to_string())
+            }
+        }
+    }
+    
+    /// Save current edit to server (replaces save_to_file)
+    pub async fn save_current_to_server(&mut self) -> Result<(), String> {
+        if let Some(attr) = &self.editing_attribute {
+            self.pending_operation = Some("Saving...".to_string());
+            
+            let result = if self.selected_index.is_some() {
+                // Update existing
+                self.api_client.update_attribute(attr.id, attr.clone()).await
+            } else {
+                // Create new
+                self.api_client.create_attribute(attr.clone()).await
+            };
+            
+            match result {
+                Ok(saved_attr) => {
+                    // Update local list
+                    if let Some(idx) = self.selected_index {
+                        self.attributes[idx] = saved_attr.clone();
+                    } else {
+                        self.attributes.push(saved_attr.clone());
+                        // Select the newly created item
+                        self.selected_index = Some(self.attributes.len() - 1);
+                    }
+                    self.editing_attribute = Some(saved_attr);
+                    self.is_dirty = false;
+                    self.status_message = "✓ Saved successfully".to_string();
+                    self.pending_operation = None;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status_message = format!("✗ Save failed: {}", e);
+                    self.pending_operation = None;
+                    Err(e.to_string())
+                }
+            }
+        } else {
+            Err("No attribute to save".to_string())
+        }
+    }
+    
+    /// Delete selected attribute from server
+    pub async fn delete_selected_from_server(&mut self) -> Result<(), String> {
+        if let Some(idx) = self.selected_index {
+            let attr = &self.attributes[idx];
+            self.pending_operation = Some("Deleting...".to_string());
+            
+            match self.api_client.delete_attribute(attr.id).await {
+                Ok(_) => {
+                    let deleted_name = self.attributes[idx].name.clone();
+                    self.attributes.remove(idx);
+                    self.selected_index = None;
+                    self.editing_attribute = None;
+                    self.is_dirty = false;
+                    self.show_delete_confirmation = false;
+                    self.status_message = format!("✓ Deleted '{}'", deleted_name);
+                    self.pending_operation = None;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status_message = format!("✗ Delete failed: {}", e);
+                    self.pending_operation = None;
+                    Err(e.to_string())
+                }
+            }
+        } else {
+            Err("No attribute selected".to_string())
+        }
+    }
+    
+    /// Check server connection
+    pub async fn check_server_connection(&mut self) -> bool {
+        match self.api_client.health_check().await {
+            Ok(true) => {
+                self.server_connected = true;
+                true
+            }
+            _ => {
+                self.server_connected = false;
+                false
+            }
         }
     }
     
@@ -86,7 +203,7 @@ impl EditorState {
         self.is_dirty = true;
     }
     
-    /// Save current edit back to the list
+    /// Save current edit back to the list (local only - call save_current_to_server for persistence)
     pub fn save_current_edit(&mut self) {
         if let Some(attr) = self.editing_attribute.take() {
             if let Some(idx) = self.selected_index {
@@ -98,7 +215,7 @@ impl EditorState {
                 self.selected_index = Some(self.attributes.len() - 1);
             }
             self.is_dirty = false;
-            self.status_message = "Changes saved to memory (use Save All to persist)".to_string();
+            self.status_message = "Changes saved locally (not persisted to server yet)".to_string();
         }
     }
     
@@ -109,7 +226,7 @@ impl EditorState {
         self.status_message = "Changes reverted".to_string();
     }
     
-    /// Delete currently selected attribute
+    /// Delete currently selected attribute (local only - call delete_selected_from_server for persistence)
     pub fn delete_selected(&mut self) {
         if let Some(idx) = self.selected_index {
             let deleted_name = self.attributes[idx].name.clone();
@@ -118,7 +235,7 @@ impl EditorState {
             self.editing_attribute = None;
             self.is_dirty = false;
             self.show_delete_confirmation = false;
-            self.status_message = format!("Deleted '{}' (use Save All to persist)", deleted_name);
+            self.status_message = format!("Deleted '{}' locally (not persisted to server yet)", deleted_name);
         }
     }
     
@@ -140,7 +257,7 @@ impl EditorState {
 
 impl Default for EditorState {
     fn default() -> Self {
-        Self::new()
+        Self::new("http://127.0.0.1:3000")
     }
 }
 
