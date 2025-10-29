@@ -2,20 +2,37 @@
 
 use crate::models::definitions::AttributeDefinition;
 use crate::models::common::{AttributeId, Percentage};
+use crate::models::cards::CardDefinition;
 use crate::editor::api_client::EditorApiClient;
 use bevy::prelude::Resource;
+
+/// Editor mode - which type of definition we're editing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorMode {
+    Attributes,
+    Cards,
+}
 
 /// Main editor state resource
 #[derive(Resource, Clone)]
 pub struct EditorState {
+    /// Current editor mode
+    pub mode: EditorMode,
+    
     /// All loaded attributes (from server)
     pub attributes: Vec<AttributeDefinition>,
+    
+    /// All loaded cards (from server)
+    pub cards: Vec<CardDefinition>,
     
     /// Currently selected attribute (index into attributes vec)
     pub selected_index: Option<usize>,
     
     /// Attribute being edited (clone of selected, or new)
     pub editing_attribute: Option<AttributeDefinition>,
+    
+    /// Card being edited (clone of selected, or new)
+    pub editing_card: Option<CardDefinition>,
     
     /// API client for server communication
     pub api_client: EditorApiClient,
@@ -48,9 +65,12 @@ pub struct EditorState {
 impl EditorState {
     pub fn new(api_url: &str) -> Self {
         Self {
+            mode: EditorMode::Attributes,
             attributes: Vec::new(),
+            cards: Vec::new(),
             selected_index: None,
             editing_attribute: None,
+            editing_card: None,
             api_client: EditorApiClient::new(api_url),
             is_dirty: false,
             search_text: String::new(),
@@ -252,6 +272,183 @@ impl EditorState {
                 }
             })
             .collect()
+    }
+    
+    // ========================================================================
+    // CARD EDITING METHODS
+    // ========================================================================
+    
+    /// Load cards from server
+    pub async fn refresh_cards_from_server(&mut self) -> Result<(), String> {
+        self.pending_operation = Some("Loading cards...".to_string());
+        
+        match self.api_client.list_cards().await {
+            Ok(cards) => {
+                self.cards = cards;
+                self.server_connected = true;
+                self.status_message = format!("✓ Loaded {} cards from server", self.cards.len());
+                self.pending_operation = None;
+                Ok(())
+            }
+            Err(e) => {
+                self.server_connected = false;
+                self.status_message = format!("✗ Server error: {}", e);
+                self.pending_operation = None;
+                Err(e.to_string())
+            }
+        }
+    }
+    
+    /// Save current card to server
+    pub async fn save_current_card_to_server(&mut self) -> Result<(), String> {
+        if let Some(card) = &self.editing_card {
+            self.pending_operation = Some("Saving card...".to_string());
+            
+            let result = if self.selected_index.is_some() {
+                // Update existing
+                self.api_client.update_card(card.id.clone(), card.clone()).await
+            } else {
+                // Create new
+                self.api_client.create_card(card.clone()).await
+            };
+            
+            match result {
+                Ok(saved_card) => {
+                    // Update local list
+                    if let Some(idx) = self.selected_index {
+                        self.cards[idx] = saved_card.clone();
+                    } else {
+                        self.cards.push(saved_card.clone());
+                        self.selected_index = Some(self.cards.len() - 1);
+                    }
+                    self.editing_card = Some(saved_card);
+                    self.is_dirty = false;
+                    self.status_message = "✓ Card saved successfully".to_string();
+                    self.pending_operation = None;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status_message = format!("✗ Save failed: {}", e);
+                    self.pending_operation = None;
+                    Err(e.to_string())
+                }
+            }
+        } else {
+            Err("No card to save".to_string())
+        }
+    }
+    
+    /// Delete selected card from server
+    pub async fn delete_selected_card_from_server(&mut self) -> Result<(), String> {
+        if let Some(idx) = self.selected_index {
+            let card = &self.cards[idx];
+            self.pending_operation = Some("Deleting card...".to_string());
+            
+            match self.api_client.delete_card(card.id.clone()).await {
+                Ok(_) => {
+                    let deleted_caption = self.cards[idx].caption.clone();
+                    self.cards.remove(idx);
+                    self.selected_index = None;
+                    self.editing_card = None;
+                    self.is_dirty = false;
+                    self.show_delete_confirmation = false;
+                    self.status_message = format!("✓ Deleted '{}'", deleted_caption);
+                    self.pending_operation = None;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status_message = format!("✗ Delete failed: {}", e);
+                    self.pending_operation = None;
+                    Err(e.to_string())
+                }
+            }
+        } else {
+            Err("No card selected".to_string())
+        }
+    }
+    
+    /// Get the currently selected card
+    pub fn selected_card(&self) -> Option<&CardDefinition> {
+        self.selected_index.and_then(|idx| self.cards.get(idx))
+    }
+    
+    /// Start editing the selected card
+    pub fn start_editing_card(&mut self) {
+        if let Some(card) = self.selected_card() {
+            self.editing_card = Some(card.clone());
+            self.is_dirty = false;
+        }
+    }
+    
+    /// Start creating a new card
+    pub fn start_creating_card(&mut self) {
+        let mut counter = 1;
+        let mut caption = format!("New Card {}", counter);
+        while self.cards.iter().any(|c| c.caption == caption) {
+            counter += 1;
+            caption = format!("New Card {}", counter);
+        }
+        
+        let new_card = CardDefinition::new(caption);
+        
+        self.editing_card = Some(new_card);
+        self.selected_index = None;
+        self.is_dirty = true;
+    }
+    
+    /// Get filtered cards based on search
+    pub fn filtered_cards(&self) -> Vec<(usize, &CardDefinition)> {
+        self.cards
+            .iter()
+            .enumerate()
+            .filter(|(_, card)| {
+                if self.search_text.is_empty() {
+                    true
+                } else {
+                    card.caption.to_lowercase().contains(&self.search_text.to_lowercase())
+                }
+            })
+            .collect()
+    }
+    
+    /// Save current card edit back to the list (local only)
+    pub fn save_current_card_edit(&mut self) {
+        if let Some(card) = self.editing_card.take() {
+            if let Some(idx) = self.selected_index {
+                // Update existing
+                self.cards[idx] = card;
+            } else {
+                // Add new
+                self.cards.push(card);
+                self.selected_index = Some(self.cards.len() - 1);
+            }
+            self.is_dirty = false;
+            self.status_message = "Changes saved locally (not persisted to server yet)".to_string();
+        }
+    }
+    
+    /// Revert current card edit
+    pub fn revert_card_edit(&mut self) {
+        self.editing_card = None;
+        self.is_dirty = false;
+        self.validation_errors.clear();
+        self.validation_warnings.clear();
+    }
+    
+    /// Delete selected card (prompts for server deletion)
+    pub fn delete_selected_card(&mut self) {
+        if self.selected_index.is_some() {
+            self.status_message = "Deleting from server...".to_string();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            match rt.block_on(self.delete_selected_card_from_server()) {
+                Ok(_) => {
+                    // Status message is set by delete_selected_card_from_server
+                }
+                Err(e) => {
+                    self.status_message = format!("✗ Failed to delete: {}", e);
+                }
+            }
+        }
     }
 }
 

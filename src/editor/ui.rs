@@ -3,8 +3,9 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::client::theme::CobaltTheme;
-use crate::editor::{EditorState, validation};
+use crate::editor::{EditorState, EditorMode, validation};
 use crate::models::definitions::AttributeCategory;
+use crate::models::cards::{CardType, DefenseType, DefenseStrength, DamageType, EquipmentSlot, Rarity};
 
 /// Main UI system that renders the editor interface
 pub fn ui_system(
@@ -26,14 +27,20 @@ pub fn ui_system(
             // Left panel - List view
             ui.vertical(|ui| {
                 ui.set_width(350.0);
-                render_list_view(ui, &mut state);
+                match state.mode {
+                    EditorMode::Attributes => render_list_view(ui, &mut state),
+                    EditorMode::Cards => render_card_list_view(ui, &mut state),
+                }
             });
             
             ui.separator();
             
             // Right panel - Detail view (take remaining space)
             ui.with_layout(egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true), |ui| {
-                render_detail_view(ui, &mut state);
+                match state.mode {
+                    EditorMode::Attributes => render_detail_view(ui, &mut state),
+                    EditorMode::Cards => render_card_detail_view(ui, &mut state),
+                }
             });
         });
     });
@@ -48,7 +55,30 @@ pub fn ui_system(
 fn render_top_bar(ctx: &egui::Context, state: &mut EditorState) {
     egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
         ui.horizontal(|ui| {
-            ui.heading("⚙ Timeloop - Attribute Editor");
+            ui.heading("⚙ Timeloop - Game Editor");
+            ui.separator();
+            
+            // Mode Tabs
+            ui.horizontal(|ui| {
+                if ui.selectable_label(matches!(state.mode, EditorMode::Attributes), "📊 Attributes").clicked() {
+                    if state.is_dirty {
+                        // TODO: Add confirmation dialog
+                    }
+                    state.mode = EditorMode::Attributes;
+                    state.editing_card = None;
+                    state.selected_index = None;
+                    state.is_dirty = false;
+                }
+                if ui.selectable_label(matches!(state.mode, EditorMode::Cards), "🃏 Cards").clicked() {
+                    if state.is_dirty {
+                        // TODO: Add confirmation dialog
+                    }
+                    state.mode = EditorMode::Cards;
+                    state.editing_attribute = None;
+                    state.selected_index = None;
+                    state.is_dirty = false;
+                }
+            });
             ui.separator();
             
             // Server connection indicator
@@ -63,31 +93,52 @@ fn render_top_bar(ctx: &egui::Context, state: &mut EditorState) {
             // Load from Server button
             if ui.button("📂 Load from Server").clicked() {
                 state.status_message = "Loading from server...".to_string();
-                // Execute synchronously using blocking runtime
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                match rt.block_on(state.refresh_from_server()) {
-                    Ok(_) => {
-                        // Status message is set by refresh_from_server
+                
+                match state.mode {
+                    EditorMode::Attributes => {
+                        match rt.block_on(state.refresh_from_server()) {
+                            Ok(_) => { /* Status message is set by refresh_from_server */ }
+                            Err(e) => {
+                                state.status_message = format!("✗ Failed to load: {}", e);
+                                state.server_connected = false;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        state.status_message = format!("✗ Failed to load: {}", e);
-                        state.server_connected = false;
+                    EditorMode::Cards => {
+                        match rt.block_on(state.refresh_cards_from_server()) {
+                            Ok(_) => { /* Status message is set by refresh_cards_from_server */ }
+                            Err(e) => {
+                                state.status_message = format!("✗ Failed to load: {}", e);
+                                state.server_connected = false;
+                            }
+                        }
                     }
                 }
             }
             
-            // Save button (saves current editing attribute only)
-            let can_save = state.editing_attribute.is_some() && state.validation_errors.is_empty();
+            // Save button (saves current editing item only)
+            let can_save = match state.mode {
+                EditorMode::Attributes => state.editing_attribute.is_some() && state.validation_errors.is_empty(),
+                EditorMode::Cards => state.editing_card.is_some() && state.validation_errors.is_empty(),
+            };
+            
             if ui.add_enabled(can_save, egui::Button::new("💾 Save to Server")).clicked() {
                 state.status_message = "Saving to server...".to_string();
-                // Execute synchronously using blocking runtime
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                match rt.block_on(state.save_current_to_server()) {
-                    Ok(_) => {
-                        // Status message is set by save_current_to_server
+                
+                match state.mode {
+                    EditorMode::Attributes => {
+                        match rt.block_on(state.save_current_to_server()) {
+                            Ok(_) => { /* Status message is set by save_current_to_server */ }
+                            Err(e) => { state.status_message = format!("✗ Failed to save: {}", e); }
+                        }
                     }
-                    Err(e) => {
-                        state.status_message = format!("✗ Failed to save: {}", e);
+                    EditorMode::Cards => {
+                        match rt.block_on(state.save_current_card_to_server()) {
+                            Ok(_) => { /* Status message is set by save_current_card_to_server */ }
+                            Err(e) => { state.status_message = format!("✗ Failed to save: {}", e); }
+                        }
                     }
                 }
             }
@@ -421,25 +472,386 @@ fn render_validation_messages(ui: &mut egui::Ui, state: &EditorState) {
     }
 }
 
+// ============================================================================
+// CARD EDITOR UI
+// ============================================================================
+
+/// Render card list view panel
+fn render_card_list_view(ui: &mut egui::Ui, state: &mut EditorState) {
+    ui.heading("Cards");
+    ui.add_space(5.0);
+    
+    // Search box
+    ui.horizontal(|ui| {
+        ui.label("🔍");
+        ui.text_edit_singleline(&mut state.search_text);
+    });
+    ui.add_space(5.0);
+    
+    // New button
+    if ui.button("➕ New Card").clicked() {
+        state.start_creating_card();
+        validation::update_validation(state);
+    }
+    
+    ui.separator();
+    ui.add_space(5.0);
+    
+    // List of cards
+    egui::ScrollArea::vertical()
+        .id_source("card_list_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+        let filtered: Vec<(usize, String, String, String)> = state.filtered_cards()
+            .into_iter()
+            .map(|(idx, card)| (
+                idx,
+                card.caption.clone(),
+                format!("{:?}", card.card_type),
+                format!("{:?}", card.rarity)
+            ))
+            .collect();
+        
+        let selected_idx = state.selected_index;
+        
+        if filtered.is_empty() {
+            ui.label("No cards found");
+        } else {
+            for (idx, caption, card_type, rarity) in filtered {
+                let is_selected = selected_idx == Some(idx);
+                
+                let response = ui.selectable_label(
+                    is_selected,
+                    format!("🃏 {}", caption)
+                );
+                
+                if response.clicked() {
+                    state.selected_index = Some(idx);
+                    state.start_editing_card();
+                    validation::update_validation(state);
+                }
+                
+                // Show type and rarity
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(format!("{} | {}", card_type, rarity));
+                });
+                
+                ui.add_space(3.0);
+            }
+        }
+    });
+}
+
+/// Render card detail/edit view panel
+fn render_card_detail_view(ui: &mut egui::Ui, state: &mut EditorState) {
+    if state.editing_card.is_none() {
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+            ui.label("Select a card to edit");
+            ui.label("or create a new one");
+        });
+        return;
+    }
+    
+    // Clone the card to avoid borrow checker issues
+    let mut card = state.editing_card.as_ref().unwrap().clone();
+    let is_new = state.selected_index.is_none();
+    let mut changed = false;
+    let mut should_apply = false;
+    let mut should_revert = false;
+    let mut should_delete = false;
+    
+    ui.heading(if !is_new {
+        format!("Editing: {}", card.caption)
+    } else {
+        "New Card".to_string()
+    });
+    
+    ui.separator();
+    ui.add_space(10.0);
+    
+    egui::ScrollArea::vertical()
+        .id_source("card_detail_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+        // ID (read-only)
+        ui.horizontal(|ui| {
+            ui.label("ID:");
+            let id_str = format!("{:?}", card.id);
+            ui.add_enabled(false, egui::TextEdit::singleline(&mut id_str.as_str()));
+        });
+        ui.add_space(5.0);
+        
+        // Caption
+        ui.horizontal(|ui| {
+            ui.label("Caption:").on_hover_text("Short display name (max 60 chars)");
+            let response = ui.add(egui::TextEdit::singleline(&mut card.caption));
+            if response.changed() {
+                changed = true;
+            }
+        });
+        ui.add_space(5.0);
+        
+        // Description
+        ui.horizontal(|ui| {
+            ui.label("Description:").on_hover_text("Card rules text (max 500 chars)");
+        });
+        let response = ui.add(egui::TextEdit::multiline(&mut card.description).desired_rows(4));
+        if response.changed() {
+            changed = true;
+        }
+        ui.add_space(5.0);
+        
+        // Card Type
+        ui.horizontal(|ui| {
+            ui.label("Type:").on_hover_text("Action or Equipment");
+            egui::ComboBox::from_id_source("card_type")
+                .selected_text(card.card_type.as_str())
+                .show_ui(ui, |ui| {
+                    for card_type in [CardType::Action, CardType::Equipment] {
+                        if ui.selectable_label(card.card_type == card_type, card_type.as_str()).clicked() {
+                            card.card_type = card_type;
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        ui.add_space(5.0);
+        
+        // Defense Type
+        ui.horizontal(|ui| {
+            ui.label("Defense Type:").on_hover_text("Primary defense type");
+            let selected_text = card.defense_type.as_ref().map(|d| d.as_str()).unwrap_or("None");
+            egui::ComboBox::from_id_source("defense_type")
+                .selected_text(selected_text)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(card.defense_type.is_none(), "None").clicked() {
+                        card.defense_type = None;
+                        changed = true;
+                    }
+                    for def_type in DefenseType::all() {
+                        if ui.selectable_label(card.defense_type.as_ref() == Some(&def_type), def_type.as_str()).clicked() {
+                            card.defense_type = Some(def_type);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        ui.add_space(5.0);
+        
+        // Defense Strength
+        ui.horizontal(|ui| {
+            ui.label("Defense Strength:").on_hover_text("How strong the defense is");
+            let selected_text = card.defense_strength.as_ref().map(|d| d.as_str()).unwrap_or("None");
+            egui::ComboBox::from_id_source("defense_strength")
+                .selected_text(selected_text)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(card.defense_strength.is_none(), "None").clicked() {
+                        card.defense_strength = None;
+                        changed = true;
+                    }
+                    for strength in DefenseStrength::all() {
+                        if ui.selectable_label(card.defense_strength.as_ref() == Some(&strength), strength.as_str()).clicked() {
+                            card.defense_strength = Some(strength);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        ui.add_space(5.0);
+        
+        // Effective Damage Types (multi-select checkboxes)
+        ui.label("Effective Against:").on_hover_text("Damage types this card counters well");
+        ui.indent("effective_dmg", |ui| {
+            for dmg_type in DamageType::all() {
+                let mut is_selected = card.effective_against.contains(&dmg_type);
+                if ui.checkbox(&mut is_selected, dmg_type.as_str()).changed() {
+                    if is_selected {
+                        card.effective_against.push(dmg_type);
+                    } else {
+                        card.effective_against.retain(|d| d != &dmg_type);
+                    }
+                    changed = true;
+                }
+            }
+        });
+        ui.add_space(5.0);
+        
+        // Ineffective Damage Types (multi-select checkboxes)
+        ui.label("Ineffective Against:").on_hover_text("Damage types this card struggles against");
+        ui.indent("ineffective_dmg", |ui| {
+            for dmg_type in DamageType::all() {
+                let mut is_selected = card.ineffective_against.contains(&dmg_type);
+                if ui.checkbox(&mut is_selected, dmg_type.as_str()).changed() {
+                    if is_selected {
+                        card.ineffective_against.push(dmg_type);
+                    } else {
+                        card.ineffective_against.retain(|d| d != &dmg_type);
+                    }
+                    changed = true;
+                }
+            }
+        });
+        ui.add_space(5.0);
+        
+        // Uses
+        ui.horizontal(|ui| {
+            ui.label("Uses:").on_hover_text("Number of times card can be used (None = unlimited)");
+            let mut uses_str = card.number_of_uses.map(|u| u.to_string()).unwrap_or_default();
+            let response = ui.add(egui::TextEdit::singleline(&mut uses_str).desired_width(100.0));
+            if response.changed() {
+                card.number_of_uses = if uses_str.is_empty() {
+                    None
+                } else {
+                    uses_str.parse::<u32>().ok()
+                };
+                changed = true;
+            }
+            if ui.button("∞").on_hover_text("Set to unlimited").clicked() {
+                card.number_of_uses = None;
+                changed = true;
+            }
+        });
+        ui.add_space(5.0);
+        
+        // Equipment Slot (only for Equipment cards)
+        if card.card_type == CardType::Equipment {
+            ui.horizontal(|ui| {
+                ui.label("Equipment Slot:").on_hover_text("Where this equipment is worn");
+                let selected_text = card.equipment_slot.as_ref().map(|s| s.as_str()).unwrap_or("None");
+                egui::ComboBox::from_id_source("equipment_slot")
+                    .selected_text(selected_text)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(card.equipment_slot.is_none(), "None").clicked() {
+                            card.equipment_slot = None;
+                            changed = true;
+                        }
+                        for slot in EquipmentSlot::all() {
+                            if ui.selectable_label(card.equipment_slot.as_ref() == Some(&slot), slot.as_str()).clicked() {
+                                card.equipment_slot = Some(slot);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            ui.add_space(5.0);
+        }
+        
+        // Rarity
+        ui.horizontal(|ui| {
+            ui.label("Rarity:").on_hover_text("How rare this card is");
+            egui::ComboBox::from_id_source("rarity")
+                .selected_text(card.rarity.as_str())
+                .show_ui(ui, |ui| {
+                    for rarity in Rarity::all() {
+                        let (r, g, b) = rarity.color();
+                        let label_color = egui::Color32::from_rgb(r, g, b);
+                        if ui.selectable_label(card.rarity == rarity, 
+                            egui::RichText::new(rarity.as_str()).color(label_color)
+                        ).clicked() {
+                            card.rarity = rarity;
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        ui.add_space(15.0);
+        
+        // Update state with changes
+        if changed {
+            state.editing_card = Some(card.clone());
+            state.mark_dirty();
+            validation::update_validation(state);
+        }
+        
+        // Validation messages
+        render_validation_messages(ui, state);
+        
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+        
+        // Action buttons
+        ui.horizontal(|ui| {
+            // Apply/Save button
+            let can_apply = state.validation_errors.is_empty();
+            if ui.add_enabled(can_apply, egui::Button::new("✓ Apply Changes")).clicked() {
+                should_apply = true;
+            }
+            
+            // Revert button
+            if ui.button("↶ Revert").clicked() {
+                should_revert = true;
+            }
+            
+            // Delete button (only for existing cards)
+            if !is_new && ui.button("🗑 Delete").clicked() {
+                should_delete = true;
+            }
+        });
+    });
+    
+    // Process actions outside the scroll area to avoid borrow issues
+    if should_apply {
+        state.save_current_card_edit();
+    }
+    if should_revert {
+        if state.selected_index.is_some() {
+            state.start_editing_card();
+        } else {
+            state.revert_card_edit();
+        }
+        validation::update_validation(state);
+    }
+    if should_delete {
+        state.show_delete_confirmation = true;
+    }
+}
+
+// ============================================================================
+// SHARED UI COMPONENTS
+// ============================================================================
+
 /// Render delete confirmation dialog
 fn render_delete_dialog(ctx: &egui::Context, state: &mut EditorState) {
     egui::Window::new("Confirm Delete")
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
-            if let Some(attr) = state.selected_attribute() {
-                ui.label(format!("Are you sure you want to delete '{}'?", attr.name));
-                ui.add_space(10.0);
-                
-                ui.horizontal(|ui| {
-                    if ui.button("Yes, Delete").clicked() {
-                        state.delete_selected();
+            match state.mode {
+                EditorMode::Attributes => {
+                    if let Some(attr) = state.selected_attribute() {
+                        ui.label(format!("Are you sure you want to delete '{}'?", attr.name));
+                        ui.add_space(10.0);
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Yes, Delete").clicked() {
+                                state.delete_selected();
+                            }
+                            
+                            if ui.button("Cancel").clicked() {
+                                state.show_delete_confirmation = false;
+                            }
+                        });
                     }
-                    
-                    if ui.button("Cancel").clicked() {
-                        state.show_delete_confirmation = false;
+                }
+                EditorMode::Cards => {
+                    if let Some(card) = state.selected_card() {
+                        ui.label(format!("Are you sure you want to delete '{}'?", card.caption));
+                        ui.add_space(10.0);
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Yes, Delete").clicked() {
+                                state.delete_selected_card();
+                            }
+                            
+                            if ui.button("Cancel").clicked() {
+                                state.show_delete_confirmation = false;
+                            }
+                        });
                     }
-                });
+                }
             }
         });
 }

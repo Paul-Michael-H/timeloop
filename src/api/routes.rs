@@ -36,5 +36,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/definitions/attributes/:id", put(update_attribute))
         .route("/api/definitions/attributes/:id", delete(delete_attribute))
         
+        // Card CRUD endpoints
+        .route("/api/definitions/cards", get(list_cards))
+        .route("/api/definitions/cards", post(create_card))
+        .route("/api/definitions/cards/:id", get(get_card))
+        .route("/api/definitions/cards/:id", put(update_card))
+        .route("/api/definitions/cards/:id", delete(delete_card))
+        
         .with_state(state)
 }

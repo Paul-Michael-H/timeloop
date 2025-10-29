@@ -12,23 +12,28 @@ use tokio::sync::RwLock;
 use tower::ServiceExt;
 use timeloop::api::handlers::AppState;
 use timeloop::api::routes::create_router;
-use timeloop::business::definitions::AttributeServiceImpl;
-use timeloop::business::validation::AttributeValidatorImpl;
+use timeloop::business::definitions::{AttributeServiceImpl, CardServiceImpl};
+use timeloop::business::validation::{AttributeValidatorImpl, CardValidatorImpl};
 use timeloop::models::common::AttributeId;
-use timeloop::persistence::InMemoryAttributePersistence;
+use timeloop::persistence::{InMemoryAttributePersistence, memory_storage::InMemoryCardPersistence};
 use timeloop::storage::{GameDefinitionsLoader, save_manager::SaveManager};
 
 /// Helper to create a test app with in-memory persistence
 fn create_test_app() -> axum::Router {
-    let persistence = Arc::new(InMemoryAttributePersistence::new());
-    let validator = Arc::new(AttributeValidatorImpl::new());
-    let attribute_service = Arc::new(AttributeServiceImpl::new(persistence, validator));
+    let attr_persistence = Arc::new(InMemoryAttributePersistence::new());
+    let attr_validator = Arc::new(AttributeValidatorImpl::new());
+    let attribute_service = Arc::new(AttributeServiceImpl::new(attr_persistence, attr_validator));
+    
+    let card_persistence = Arc::new(InMemoryCardPersistence::new());
+    let card_validator = Arc::new(CardValidatorImpl::new());
+    let card_service = Arc::new(CardServiceImpl::new(card_persistence, card_validator));
     
     let state = AppState {
         game_state: Arc::new(RwLock::new(None)),
         definitions: Arc::new(GameDefinitionsLoader::new()),
         save_manager: Arc::new(SaveManager::new("test_saves")),
         attribute_service,
+        card_service,
     };
     
     create_router(state)

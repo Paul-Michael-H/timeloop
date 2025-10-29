@@ -11,9 +11,10 @@ use timeloop::api::middleware::{cors_layer, tracing_layer};
 use timeloop::storage::{GameDefinitionsLoader, save_manager::SaveManager};
 
 // New: Import business logic and persistence layers
-use timeloop::business::definitions::AttributeServiceImpl;
-use timeloop::business::validation::AttributeValidatorImpl;
+use timeloop::business::definitions::{AttributeServiceImpl, CardServiceImpl};
+use timeloop::business::validation::{AttributeValidatorImpl, CardValidatorImpl};
 use timeloop::persistence::{FileAttributePersistence, AttributePersistence};
+use timeloop::persistence::file_storage::FileCardPersistence;
 
 #[tokio::main]
 async fn main() {
@@ -64,6 +65,22 @@ async fn main() {
     ));
     tracing::info!("Attribute service initialized with dependency injection");
     
+    // 4. Create card persistence layer (file-based)
+    let cards_file = data_path.join("cards.json");
+    let card_persistence = Arc::new(FileCardPersistence::new(cards_file.clone()));
+    tracing::info!("Card persistence initialized: {:?}", cards_file);
+    
+    // 5. Create card validator
+    let card_validator = Arc::new(CardValidatorImpl::new());
+    tracing::info!("Card validator initialized");
+    
+    // 6. Create card service (injecting persistence and validator)
+    let card_service = Arc::new(CardServiceImpl::new(
+        card_persistence,
+        card_validator,
+    ));
+    tracing::info!("Card service initialized with dependency injection");
+    
     // === END NEW ===
     
     // Create shared application state
@@ -72,6 +89,7 @@ async fn main() {
         definitions: definitions.clone(),
         save_manager: save_manager.clone(),
         attribute_service, // Inject service into app state
+        card_service, // Inject card service into app state
     };
     
     // Create router with all endpoints

@@ -15,8 +15,7 @@ use crate::game_engine::simulation::{GameState, GameAction};
 use crate::models::common::*;
 use crate::storage::{GameDefinitionsLoader, save_manager::SaveManager};
 
-// New: Import business logic trait for method calls
-use crate::business::AttributeService;
+// New: Import business logic traits for method calls (used via trait objects)
 
 // ============================================================================
 // SHARED STATE
@@ -29,8 +28,9 @@ pub struct AppState {
     pub definitions: Arc<GameDefinitionsLoader>,
     pub save_manager: Arc<SaveManager>,
     // New: Injected business logic services
-    // Using concrete type for now - can be made generic later if needed
-    pub attribute_service: Arc<crate::business::definitions::AttributeServiceImpl>,
+    // Using trait objects for flexibility in tests
+    pub attribute_service: Arc<dyn crate::business::definitions::AttributeService + Send + Sync>,
+    pub card_service: Arc<dyn crate::business::definitions::CardService + Send + Sync>,
 }
 
 // ============================================================================
@@ -436,6 +436,97 @@ pub async fn search_attributes(
     
     // 2. Return response
     Ok(Json(attrs))
+}
+
+// ============================================================================
+// CARD HANDLERS (CRUD)
+// ============================================================================
+
+/// GET /api/definitions/cards - List all cards or search
+pub async fn list_cards(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Vec<crate::models::cards::CardDefinition>>, ApiError> {
+    let cards = if let Some(query) = params.get("q") {
+        state.card_service.search_cards(query).await
+    } else {
+        state.card_service.list_cards().await
+    }
+    .map_err(ApiError::from_business_error)?;
+    
+    Ok(Json(cards))
+}
+
+/// POST /api/definitions/cards - Create a new card
+pub async fn create_card(
+    State(state): State<AppState>,
+    Json(card): Json<crate::models::cards::CardDefinition>,
+) -> Result<(StatusCode, Json<crate::models::cards::CardDefinition>), ApiError> {
+    // 1. Call service (ALL business logic here)
+    let created = state.card_service.create_card(card).await
+        .map_err(ApiError::from_business_error)?;
+    
+    // 2. Return response with 201 Created
+    Ok((StatusCode::CREATED, Json(created)))
+}
+
+/// GET /api/definitions/cards/:id - Get a single card
+pub async fn get_card(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<crate::models::cards::CardDefinition>, ApiError> {
+    // 1. Parse ID
+    let card_id = crate::models::cards::CardId::from_string(&id)
+        .map_err(|e| ApiError::InvalidInput(format!("Invalid card ID: {}", e)))?;
+    
+    // 2. Call service
+    let card = state.card_service.get_card(&card_id).await
+        .map_err(ApiError::from_business_error)?;
+    
+    // 3. Return response
+    Ok(Json(card))
+}
+
+/// PUT /api/definitions/cards/:id - Update a card
+pub async fn update_card(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(card): Json<crate::models::cards::CardDefinition>,
+) -> Result<Json<crate::models::cards::CardDefinition>, ApiError> {
+    // 1. Parse ID from path
+    let path_id = crate::models::cards::CardId::from_string(&id)
+        .map_err(|e| ApiError::InvalidInput(format!("Invalid card ID: {}", e)))?;
+    
+    // 2. Ensure card ID matches path (business rule)
+    if card.id.to_string() != path_id.to_string() {
+        return Err(ApiError::InvalidInput(
+            format!("Card ID mismatch: path={}, body={}", path_id, card.id)
+        ));
+    }
+    
+    // 3. Call service (ALL business logic here)
+    let updated = state.card_service.update_card(card).await
+        .map_err(ApiError::from_business_error)?;
+    
+    // 4. Return response
+    Ok(Json(updated))
+}
+
+/// DELETE /api/definitions/cards/:id - Delete a card
+pub async fn delete_card(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, ApiError> {
+    // 1. Parse ID
+    let card_id = crate::models::cards::CardId::from_string(&id)
+        .map_err(|e| ApiError::InvalidInput(format!("Invalid card ID: {}", e)))?;
+    
+    // 2. Call service
+    state.card_service.delete_card(&card_id).await
+        .map_err(ApiError::from_business_error)?;
+    
+    // 3. Return 204 No Content
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ============================================================================

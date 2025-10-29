@@ -6,6 +6,6 @@ pub mod ui;
 pub mod validation;
 pub mod io;
 
-pub use state::EditorState;
+pub use state::{EditorState, EditorMode};
 pub use ui::ui_system;
 pub use api_client::EditorApiClient;

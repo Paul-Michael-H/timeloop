@@ -181,15 +181,21 @@ async fn create_test_app() -> axum::Router {
     // Create test state
     let definitions = GameDefinitionsLoader::new();
     let save_manager = SaveManager::new("./test_saves");
-    let persistence = Arc::new(InMemoryAttributePersistence::new());
-    let validator = Arc::new(AttributeValidatorImpl::new());
-    let attribute_service = Arc::new(AttributeServiceImpl::new(persistence, validator));
+    
+    let attr_persistence = Arc::new(InMemoryAttributePersistence::new());
+    let attr_validator = Arc::new(AttributeValidatorImpl::new());
+    let attribute_service = Arc::new(AttributeServiceImpl::new(attr_persistence, attr_validator));
+    
+    let card_persistence = Arc::new(timeloop::persistence::memory_storage::InMemoryCardPersistence::new());
+    let card_validator = Arc::new(timeloop::business::validation::CardValidatorImpl::new());
+    let card_service = Arc::new(timeloop::business::definitions::CardServiceImpl::new(card_persistence, card_validator));
     
     let state = AppState {
         game_state: Arc::new(RwLock::new(None::<GameState>)),
         definitions: Arc::new(definitions),
         save_manager: Arc::new(save_manager),
         attribute_service,
+        card_service,
     };
 
     create_router(state)
