@@ -4,3 +4,4 @@
 pub mod common;
 pub mod definitions;
 pub mod instances;
+pub mod cards;

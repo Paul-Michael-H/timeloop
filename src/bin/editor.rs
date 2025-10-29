@@ -18,6 +18,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, (
             check_initial_load_system,
+            periodic_connection_check_system,
             timeloop::editor::ui_system,
         ))
         .run();
@@ -50,24 +51,46 @@ fn check_initial_load_system(
     if !load_state.attempted {
         load_state.attempted = true;
         
-        // Spawn async task to load from server
-        let api_client = state.api_client.clone();
-        
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                match api_client.health_check().await {
-                    Ok(true) => {
-                        info!("✓ Server is reachable");
+        // Check server connection synchronously
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        match rt.block_on(state.check_server_connection()) {
+            true => {
+                info!("✓ Server is reachable - attempting to load attributes");
+                match rt.block_on(state.refresh_from_server()) {
+                    Ok(_) => {
+                        info!("✓ Loaded {} attributes from server", state.attributes.len());
                     }
-                    _ => {
-                        warn!("✗ Server is not reachable - editor will work in offline mode");
+                    Err(e) => {
+                        warn!("✗ Failed to load attributes: {}", e);
                     }
                 }
+            }
+            false => {
+                warn!("✗ Server is not reachable - check that timeloop-server is running");
+                state.status_message = "✗ Server not reachable - is timeloop-server running?".to_string();
+            }
+        }
+    }
+}
+
+/// System to periodically check server connection
+fn periodic_connection_check_system(
+    state: Res<timeloop::editor::EditorState>,
+    time: Res<Time>,
+) {
+    // Check every 5 seconds
+    static mut LAST_CHECK: f32 = 0.0;
+    unsafe {
+        LAST_CHECK += time.delta_seconds();
+        if LAST_CHECK >= 5.0 {
+            LAST_CHECK = 0.0;
+            
+            // Quick health check (don't block)
+            let api_client = state.api_client.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _ = rt.block_on(api_client.health_check());
             });
-        });
-        
-        // Set initial status
-        state.status_message = "Checking server connection...".to_string();
+        }
     }
 }

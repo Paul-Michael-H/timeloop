@@ -294,3 +294,124 @@ mod tests {
         assert_eq!(all1.len(), all2.len());
     }
 }
+
+// ============================================================================
+// Card Persistence Implementation
+// ============================================================================
+
+use crate::persistence::traits::CardPersistence;
+use crate::models::cards::{CardDefinition, CardId};
+
+/// File-based implementation for cards
+pub struct FileCardPersistence {
+    file_path: PathBuf,
+    cache: RwLock<Option<Vec<CardDefinition>>>,
+}
+
+impl FileCardPersistence {
+    pub fn new(file_path: impl Into<PathBuf>) -> Self {
+        Self {
+            file_path: file_path.into(),
+            cache: RwLock::new(None),
+        }
+    }
+    
+    async fn load_from_file(&self) -> Result<Vec<CardDefinition>, PersistenceError> {
+        if !self.file_path.exists() {
+            return Ok(Vec::new());
+        }
+        
+        let content = fs::read_to_string(&self.file_path).await?;
+        let cards: Vec<CardDefinition> = serde_json::from_str(&content)?;
+        
+        Ok(cards)
+    }
+    
+    async fn save_to_file(&self, cards: &[CardDefinition]) -> Result<(), PersistenceError> {
+        if let Some(parent) = self.file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        
+        if self.file_path.exists() {
+            let backup = self.file_path.with_extension("json.backup");
+            let _ = fs::copy(&self.file_path, &backup).await;
+        }
+        
+        let json = serde_json::to_string_pretty(&cards)?;
+        let temp_path = self.file_path.with_extension("tmp");
+        fs::write(&temp_path, json).await?;
+        fs::rename(&temp_path, &self.file_path).await?;
+        
+        *self.cache.write().unwrap() = Some(cards.to_vec());
+        
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl CardPersistence for FileCardPersistence {
+    async fn save(&self, card: &CardDefinition) -> Result<(), PersistenceError> {
+        let mut all = self.list_all().await?;
+        
+        if let Some(existing) = all.iter_mut().find(|c| c.id.to_string() == card.id.to_string()) {
+            *existing = card.clone();
+        } else {
+            all.push(card.clone());
+        }
+        
+        self.save_to_file(&all).await
+    }
+    
+    async fn delete(&self, id: &CardId) -> Result<(), PersistenceError> {
+        let mut all = self.list_all().await?;
+        
+        let initial_len = all.len();
+        all.retain(|c| c.id.to_string() != id.to_string());
+        
+        if all.len() == initial_len {
+            return Err(PersistenceError::NotFound);
+        }
+        
+        self.save_to_file(&all).await
+    }
+    
+    async fn get(&self, id: &CardId) -> Result<Option<CardDefinition>, PersistenceError> {
+        let all = self.list_all().await?;
+        Ok(all.into_iter().find(|c| c.id.to_string() == id.to_string()))
+    }
+    
+    async fn list_all(&self) -> Result<Vec<CardDefinition>, PersistenceError> {
+        // Check cache first
+        {
+            let cache = self.cache.read().unwrap();
+            if let Some(cached) = cache.as_ref() {
+                return Ok(cached.clone());
+            }
+        }
+        
+        // Load from file
+        let cards = self.load_from_file().await?;
+        
+        // Update cache
+        {
+            let mut cache = self.cache.write().unwrap();
+            *cache = Some(cards.clone());
+        }
+        
+        Ok(cards)
+    }
+    
+    async fn exists_by_caption(&self, caption: &str) -> Result<bool, PersistenceError> {
+        let all = self.list_all().await?;
+        Ok(all.iter().any(|c| c.caption.eq_ignore_ascii_case(caption)))
+    }
+    
+    async fn search_by_caption(&self, query: &str) -> Result<Vec<CardDefinition>, PersistenceError> {
+        let all = self.list_all().await?;
+        let query_lower = query.to_lowercase();
+        
+        Ok(all.into_iter()
+            .filter(|c| c.caption.to_lowercase().contains(&query_lower))
+            .collect())
+    }
+}

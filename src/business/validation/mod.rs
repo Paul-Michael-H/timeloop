@@ -2,9 +2,11 @@
 // All validators are trait-based for dependency injection
 
 pub mod attributes;
+pub mod cards;
 
 // Re-export
 pub use attributes::{AttributeValidator, AttributeValidatorImpl};
+pub use cards::{CardValidator, CardValidatorImpl};
 
 use thiserror::Error;
 

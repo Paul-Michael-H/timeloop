@@ -197,3 +197,80 @@ mod tests {
         assert_eq!(all.len(), 2);
     }
 }
+
+// ============================================================================
+// In-Memory Card Persistence (for testing)
+// ============================================================================
+
+use crate::persistence::traits::CardPersistence;
+use crate::models::cards::{CardDefinition, CardId};
+
+/// In-memory implementation for cards - used for testing
+pub struct InMemoryCardPersistence {
+    data: RwLock<HashMap<String, CardDefinition>>,
+}
+
+impl InMemoryCardPersistence {
+    pub fn new() -> Self {
+        Self {
+            data: RwLock::new(HashMap::new()),
+        }
+    }
+    
+    pub fn with_data(cards: Vec<CardDefinition>) -> Self {
+        let mut map = HashMap::new();
+        for card in cards {
+            map.insert(card.id.to_string(), card);
+        }
+        Self {
+            data: RwLock::new(map),
+        }
+    }
+}
+
+impl Default for InMemoryCardPersistence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardPersistence for InMemoryCardPersistence {
+    async fn save(&self, card: &CardDefinition) -> Result<(), PersistenceError> {
+        let mut data = self.data.write().unwrap();
+        data.insert(card.id.to_string(), card.clone());
+        Ok(())
+    }
+    
+    async fn delete(&self, id: &CardId) -> Result<(), PersistenceError> {
+        let mut data = self.data.write().unwrap();
+        data.remove(&id.to_string())
+            .ok_or(PersistenceError::NotFound)?;
+        Ok(())
+    }
+    
+    async fn get(&self, id: &CardId) -> Result<Option<CardDefinition>, PersistenceError> {
+        let data = self.data.read().unwrap();
+        Ok(data.get(&id.to_string()).cloned())
+    }
+    
+    async fn list_all(&self) -> Result<Vec<CardDefinition>, PersistenceError> {
+        let data = self.data.read().unwrap();
+        Ok(data.values().cloned().collect())
+    }
+    
+    async fn exists_by_caption(&self, caption: &str) -> Result<bool, PersistenceError> {
+        let data = self.data.read().unwrap();
+        Ok(data.values().any(|c| c.caption.eq_ignore_ascii_case(caption)))
+    }
+    
+    async fn search_by_caption(&self, query: &str) -> Result<Vec<CardDefinition>, PersistenceError> {
+        let data = self.data.read().unwrap();
+        let query_lower = query.to_lowercase();
+        
+        Ok(data.values()
+            .filter(|c| c.caption.to_lowercase().contains(&query_lower))
+            .cloned()
+            .collect())
+    }
+}

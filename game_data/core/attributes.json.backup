@@ -20,5 +20,27 @@
     "max_value": 100,
     "training_difficulty": 100,
     "icon": "mental.png"
+  },
+  {
+    "id": "d5556d79-4952-4752-899f-4ebf7e862566",
+    "name": "Strength",
+    "description": "We need more text",
+    "category": "Physical",
+    "base_value": 10,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 100,
+    "icon": "my.png"
+  },
+  {
+    "id": "cd7ec70e-e807-4778-8c88-b8fa1eaccb04",
+    "name": "Dexterity",
+    "description": "Quickness",
+    "category": "Physical",
+    "base_value": 10,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 100,
+    "icon": null
   }
 ]

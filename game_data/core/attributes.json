@@ -42,5 +42,16 @@
     "max_value": 100,
     "training_difficulty": 100,
     "icon": null
+  },
+  {
+    "id": "44b2480d-fd90-4262-95eb-0457e6c3cfb7",
+    "name": "New Attribute 1",
+    "description": "A new attribute for the game",
+    "category": "Social",
+    "base_value": 1,
+    "min_value": 1,
+    "max_value": 100,
+    "training_difficulty": 100,
+    "icon": null
   }
 ]

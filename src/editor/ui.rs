@@ -62,23 +62,34 @@ fn render_top_bar(ctx: &egui::Context, state: &mut EditorState) {
             
             // Load from Server button
             if ui.button("📂 Load from Server").clicked() {
-                let mut state_clone = state.clone();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(state_clone.refresh_from_server());
-                });
                 state.status_message = "Loading from server...".to_string();
+                // Execute synchronously using blocking runtime
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                match rt.block_on(state.refresh_from_server()) {
+                    Ok(_) => {
+                        // Status message is set by refresh_from_server
+                    }
+                    Err(e) => {
+                        state.status_message = format!("✗ Failed to load: {}", e);
+                        state.server_connected = false;
+                    }
+                }
             }
             
             // Save button (saves current editing attribute only)
             let can_save = state.editing_attribute.is_some() && state.validation_errors.is_empty();
             if ui.add_enabled(can_save, egui::Button::new("💾 Save to Server")).clicked() {
-                let mut state_clone = state.clone();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(state_clone.save_current_to_server());
-                });
                 state.status_message = "Saving to server...".to_string();
+                // Execute synchronously using blocking runtime
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                match rt.block_on(state.save_current_to_server()) {
+                    Ok(_) => {
+                        // Status message is set by save_current_to_server
+                    }
+                    Err(e) => {
+                        state.status_message = format!("✗ Failed to save: {}", e);
+                    }
+                }
             }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

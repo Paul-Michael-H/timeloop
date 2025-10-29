@@ -71,6 +71,28 @@ pub trait AttributePersistence: Send + Sync {
     async fn search_by_name(&self, query: &str) -> Result<Vec<AttributeDefinition>, PersistenceError>;
 }
 
+/// Persistence trait for cards - business logic depends on THIS, not implementation
+#[async_trait::async_trait]
+pub trait CardPersistence: Send + Sync {
+    /// Save or update a card
+    async fn save(&self, card: &crate::models::cards::CardDefinition) -> Result<(), PersistenceError>;
+    
+    /// Delete a card by ID
+    async fn delete(&self, id: &crate::models::cards::CardId) -> Result<(), PersistenceError>;
+    
+    /// Get a single card by ID
+    async fn get(&self, id: &crate::models::cards::CardId) -> Result<Option<crate::models::cards::CardDefinition>, PersistenceError>;
+    
+    /// List all cards
+    async fn list_all(&self) -> Result<Vec<crate::models::cards::CardDefinition>, PersistenceError>;
+    
+    /// Check if a card with this caption exists
+    async fn exists_by_caption(&self, caption: &str) -> Result<bool, PersistenceError>;
+    
+    /// Search cards by caption (contains match, case-insensitive)
+    async fn search_by_caption(&self, query: &str) -> Result<Vec<crate::models::cards::CardDefinition>, PersistenceError>;
+}
+
 // Future traits for other definition types
 // pub trait AffinityPersistence: Send + Sync { ... }
 // pub trait EffectPersistence: Send + Sync { ... }
